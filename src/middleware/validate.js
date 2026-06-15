@@ -55,18 +55,6 @@ export function validateExpertReview(req, res, next) {
   next();
 }
 
-export function validateAssessment(req, res, next) {
-  const { country, state } = req.body;
-
-  if (!isNonEmptyString(country)) {
-    res.status(400).json({ success: false, message: "Country is required" });
-    return;
-  }
-
-  if (country === "Nigeria" && !isNonEmptyString(state)) {
-    res.status(400).json({ success: false, message: "State is required for Nigeria" });
-    return;
-  }
-
+export function validateAssessment(_req, _res, next) {
   next();
 }

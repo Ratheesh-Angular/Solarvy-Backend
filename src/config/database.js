@@ -53,16 +53,29 @@ async function initSchema(db) {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS assessment_drafts (
+      id SERIAL PRIMARY KEY,
+      form_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
+  const columnCheck = await db.query(`
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_name = 'assessments' AND column_name = 'form_data'
+  `);
+
+  if (columnCheck.rowCount === 0) {
+    await db.query(`DROP TABLE IF EXISTS assessments CASCADE`);
+  }
+
+  await db.query(`
     CREATE TABLE IF NOT EXISTS assessments (
       id SERIAL PRIMARY KEY,
-      country VARCHAR(100) NOT NULL,
-      state VARCHAR(100) DEFAULT '',
-      property_type VARCHAR(100) DEFAULT '',
-      power_source VARCHAR(100) DEFAULT '',
-      input_method VARCHAR(100) DEFAULT '',
-      objective VARCHAR(100) DEFAULT '',
-      category VARCHAR(100) DEFAULT '',
-      load_rows JSONB DEFAULT '[]'::jsonb,
+      draft_id INTEGER REFERENCES assessment_drafts(id) ON DELETE SET NULL,
+      form_data JSONB NOT NULL DEFAULT '{}'::jsonb,
       results JSONB,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
