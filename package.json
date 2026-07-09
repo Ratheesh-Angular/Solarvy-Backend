@@ -1,22 +1,29 @@
 {
   "name": "solarvy-backend",
   "version": "1.0.0",
-  "description": "Solarvy API — Node.js backend for EC2 deployment",
+  "description": "Solarvy API - Node.js backend for EC2 deployment",
   "main": "src/server.js",
   "type": "module",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "predev": "powershell -ExecutionPolicy Bypass -File scripts/kill-port.ps1 -Port 5000",
+    "dev": "node --watch src/server.js",
+    "test:excel": "node scripts/test-excel.mjs",
+    "setup:local": "powershell -ExecutionPolicy Bypass -File scripts/setup-local.ps1"
   },
   "engines": {
     "node": ">=18.0.0"
   },
   "dependencies": {
+    "@aws-sdk/client-textract": "^3.1083.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
+    "exceljs": "^4.4.0",
     "express": "^4.21.2",
     "helmet": "^8.0.0",
     "morgan": "^1.10.0",
-    "pg": "^8.21.0"
+    "multer": "^2.2.0",
+    "pg": "^8.21.0",
+    "tesseract.js": "^7.0.0"
   }
 }

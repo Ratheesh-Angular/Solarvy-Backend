@@ -34,7 +34,7 @@ export async function updateDraft(id, formData) {
   return result.rows[0] ?? null;
 }
 
-export async function createAssessmentFromDraft(draftId, formData) {
+export async function createAssessmentFromDraft(draftId, formData, results = null) {
   const client = await getPool().connect();
 
   try {
@@ -50,10 +50,14 @@ export async function createAssessmentFromDraft(draftId, formData) {
     }
 
     const result = await client.query(
-      `INSERT INTO assessments (draft_id, form_data)
-       VALUES ($1, $2)
-       RETURNING id, draft_id, form_data, created_at`,
-      [draftId || null, JSON.stringify(formData ?? {})],
+      `INSERT INTO assessments (draft_id, form_data, results)
+       VALUES ($1, $2, $3)
+       RETURNING id, draft_id, form_data, results, created_at`,
+      [
+        draftId || null,
+        JSON.stringify(formData ?? {}),
+        results ? JSON.stringify(results) : null,
+      ],
     );
 
     await client.query("COMMIT");
