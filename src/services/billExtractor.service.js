@@ -273,14 +273,30 @@ function hasAnyValue(result) {
   );
 }
 
+function hasExplicitAwsCredentials() {
+  return Boolean(
+    process.env.AWS_ACCESS_KEY_ID?.trim() ||
+      process.env.AWS_PROFILE?.trim() ||
+      process.env.AWS_SECRET_ACCESS_KEY?.trim(),
+  );
+}
+
+function shouldUseLocalOcr() {
+  if (process.env.BILL_OCR_FALLBACK === "tesseract") return true;
+  if (process.env.BILL_OCR_FALLBACK === "textract") return false;
+
+  // Local/dev without keys: skip Textract so the AWS credential chain
+  // cannot hang on EC2 metadata and reset the Vite proxy (502).
+  const isProd = process.env.NODE_ENV === "production";
+  return !isProd && !hasExplicitAwsCredentials();
+}
+
 /**
  * Extract monthly usage / spend / tariff from a utility bill image or PDF.
  * Uses AWS Textract in production; falls back to Tesseract when AWS is unavailable.
  */
 export async function extractBillValues(fileBuffer) {
-  const preferLocal = process.env.BILL_OCR_FALLBACK === "tesseract";
-
-  if (preferLocal) {
+  if (shouldUseLocalOcr()) {
     return extractWithTesseract(fileBuffer);
   }
 

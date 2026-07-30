@@ -48,6 +48,13 @@ const sampleForm = {
   custom: { rows: [] },
 };
 
+function assertNumber(label, value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) {
+    throw new Error(`${label} missing or not a number: ${value}`);
+  }
+  console.log(`   ${label}:`, value);
+}
+
 async function main() {
   const engine = hasRecalcEngine();
   console.log("Recalculation engine:", engine ?? "none");
@@ -73,10 +80,28 @@ async function main() {
 
   console.log("\n3. Full calculation (bill method)...");
   const results = await calculateAssessment(sampleForm);
-  console.log("   recommendedSolarKwp:", results.recommendedSolarKwp);
-  console.log("   recommendedBatteryKwh:", results.recommendedBatteryKwh);
-  console.log("   estimatedSystemCost:", results.estimatedSystemCost);
-  console.log("   simplePaybackYears:", results.simplePaybackYears);
+
+  console.log("   propertyType:", results.propertyType);
+  assertNumber("recommendedSolarKwp", results.recommendedSolarKwp);
+  assertNumber("recommendedBatteryKwh", results.recommendedBatteryKwh);
+  assertNumber("estimatedSystemCost (B15)", results.estimatedSystemCost);
+  assertNumber("grossAnnualSavings (B16)", results.grossAnnualSavings);
+  assertNumber("annualOmAllowance (B17)", results.annualOmAllowance);
+  assertNumber("netAnnualSavings (B18)", results.netAnnualSavings);
+  assertNumber("simplePaybackYears (B19)", results.simplePaybackYears);
+  assertNumber("solarShare (B27)", results.solarShare);
+  assertNumber("gridOffset (B28)", results.gridOffset);
+  assertNumber("dieselReduction (B29)", results.dieselReduction);
+  if (!results.systemClass || typeof results.systemClass !== "string") {
+    throw new Error(`systemClass (B31) missing or invalid: ${results.systemClass}`);
+  }
+  console.log("   systemClass (B31):", results.systemClass);
+
+  if (results.propertyType !== sampleForm.propertyType) {
+    throw new Error(
+      `propertyType mismatch: expected ${sampleForm.propertyType}, got ${results.propertyType}`,
+    );
+  }
 
   console.log("\nAll Excel tests passed.");
 }

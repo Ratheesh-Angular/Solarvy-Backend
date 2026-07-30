@@ -18,15 +18,40 @@ export function cellValue(cell) {
   if (v === null || v === undefined) return null;
   if (typeof v === "object") {
     if (v.result !== undefined) {
-      return v.result?.error ? null : v.result;
+      if (v.result?.error) return null;
+      return coerceCellPrimitive(v.result);
     }
     if (v.richText) return v.richText.map((r) => r.text).join("");
-    if (v.text) return v.text;
+    if (v.text) return coerceCellPrimitive(v.text);
     if (v.error) return null;
     if (v instanceof Date) return v.toISOString();
     return null;
   }
-  return v;
+  return coerceCellPrimitive(v);
+}
+
+/** Coerce currency/percentage-looking strings to numbers when safe. */
+function coerceCellPrimitive(value) {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === "boolean") return value;
+  if (typeof value !== "string") return value;
+
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  // Keep non-numeric labels as strings (e.g. "Hot", "Nigeria").
+  if (!/^[-+]?[₦$€£]?\s*[\d,.]+%?$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  const asPercent = trimmed.endsWith("%");
+  const cleaned = trimmed.replace(/[₦$€£,\s%]/g, "");
+  const n = Number(cleaned);
+  if (!Number.isFinite(n)) return trimmed;
+  return asPercent ? n / 100 : n;
 }
 
 function readColumnRange(sheet, range) {

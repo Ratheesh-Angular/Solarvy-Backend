@@ -1,14 +1,23 @@
 import path from "node:path";
 import os from "node:os";
+import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export function getTemplatePath() {
-  return (
-    process.env.EXCEL_TEMPLATE_PATH ||
-    path.resolve(__dirname, "../../templates/solarvy-calculator.xlsx")
+  if (process.env.EXCEL_TEMPLATE_PATH) {
+    return process.env.EXCEL_TEMPLATE_PATH;
+  }
+  // Client final workbook is the source of truth.
+  const finalPath = path.resolve(
+    __dirname,
+    "../../excel/solarvy_final_version.xlsx",
   );
+  if (fs.existsSync(finalPath)) {
+    return finalPath;
+  }
+  return path.resolve(__dirname, "../../templates/solarvy-calculator.xlsx");
 }
 
 export function getTempDir() {
@@ -64,8 +73,18 @@ export const INPUT_METHOD_LABELS = {
 export const APPLIANCE_TABLE = {
   sheet: SHEETS.applianceInput,
   startRow: 4,
-  endRow: 23,
-  columns: { name: "A", qty: "B", watts: "C", hours: "D", dutyCycle: "E" },
+  /** Formula-driven appliance names (INDEX/CHOOSE) live in A4:A20. */
+  templateEndRow: 20,
+  /** User-added extras start at templateEndRow+1; headroom through endRow. */
+  endRow: 40,
+  columns: {
+    name: "A",
+    qty: "B",
+    watts: "C",
+    hours: "D",
+    dutyCycle: "E",
+    dailyKwh: "G",
+  },
 };
 
 export const CUSTOM_TABLE = {
@@ -137,6 +156,7 @@ export const OUTPUT_CELLS = {
   solarShare: "B27",
   gridOffset: "B28",
   dieselReduction: "B29",
+  systemClass: "B31",
 };
 
 /** Summary cells read back after recalculation (authoritative values). */
