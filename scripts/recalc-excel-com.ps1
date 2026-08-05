@@ -36,6 +36,24 @@ function Set-CellValue($ws, $addr, $value) {
   } catch { }
 }
 
+function Set-BackupDuration($ws, $hours) {
+  if ($null -eq $hours -or "$hours" -eq "") { return $false }
+  $addr = "B25"
+  try {
+    $cell = $ws.Range($addr)
+    # Dropdown validation can reject/ silently block numeric writes; relax for this cell.
+    try { $cell.Validation.ShowError = $false } catch { }
+    try { $cell.Validation.Delete() } catch { }
+    $cell.Value2 = [double]$hours
+    $written = $cell.Value2
+    Write-Output "COM_SET B25=$written (requested=$hours)"
+    return ($null -ne $written -and [Math]::Abs([double]$written - [double]$hours) -lt 0.01)
+  } catch {
+    Write-Output "COM_SET B25 FAILED: $_"
+    return $false
+  }
+}
+
 try {
   $excel = New-Object -ComObject Excel.Application
   $excel.Visible = $false
@@ -74,7 +92,16 @@ try {
       Set-CellValue $ui "B21" ([double]$inputs.roofArea)
     }
     if ($null -ne $inputs.backupDuration -and "$($inputs.backupDuration)" -ne "") {
-      Set-CellValue $ui "B25" ([double]$inputs.backupDuration)
+      $okBackup = Set-BackupDuration $ui $inputs.backupDuration
+      if (-not $okBackup) {
+        # Retry as text matching the dropdown list ("1"…"8")
+        try {
+          $ui.Range("B25").Value2 = [string]([int][double]$inputs.backupDuration)
+          Write-Output "COM_SET B25 retry text=$($ui.Range('B25').Value2)"
+        } catch {
+          Write-Output "COM_SET B25 retry failed: $_"
+        }
+      }
     }
     if ($null -ne $inputs.gridTariff -and "$($inputs.gridTariff)" -ne "") {
       Set-CellValue $ui "B30" ([double]$inputs.gridTariff)
@@ -85,31 +112,86 @@ try {
     }
 
     # Appliance rows (user + template zone values) when provided
-    if ($inputs.applianceRows) {
+    if ($null -ne $inputs.applianceRows) {
       $app = $wb.Worksheets.Item("Appliance_Input")
-      foreach ($row in $inputs.applianceRows) {
+      $table = $inputs.applianceTable
+      $startRow = 4
+      $templateEnd = 20
+      $endRow = 40
+      if ($null -ne $table) {
+        if ($null -ne $table.startRow) { $startRow = [int]$table.startRow }
+        if ($null -ne $table.templateEndRow) { $templateEnd = [int]$table.templateEndRow }
+        if ($null -ne $table.endRow) { $endRow = [int]$table.endRow }
+      }
+
+      $referenced = @{}
+      foreach ($row in @($inputs.applianceRows)) {
         $r = [int]$row.excelRow
-        if ($r -lt 4) { continue }
-        if ($row.source -eq "user" -or $r -ge 21) {
+        if ($r -lt $startRow -or $r -gt $endRow) { continue }
+        $referenced[$r] = $true
+        if ($row.source -eq "user" -or $r -gt $templateEnd) {
           Set-CellValue $app ("A" + $r) $row.name
         }
-        if ($null -ne $row.qty) { Set-CellValue $app ("B" + $r) ([double]$row.qty) }
-        if ($null -ne $row.watts) { Set-CellValue $app ("C" + $r) ([double]$row.watts) }
-        if ($null -ne $row.hours) { Set-CellValue $app ("D" + $r) ([double]$row.hours) }
-        if ($null -ne $row.dutyCycle) { Set-CellValue $app ("E" + $r) ([double]$row.dutyCycle) }
+        $app.Range("B$r").Value2 = [double](0 + $row.qty)
+        $app.Range("C$r").Value2 = [double](0 + $row.watts)
+        $app.Range("D$r").Value2 = [double](0 + $row.hours)
+        $app.Range("E$r").Value2 = [double](0 + $row.dutyCycle)
+      }
+
+      # Clear unused template-zone input cells (keep name formulas in A)
+      for ($r = $startRow; $r -le $templateEnd; $r++) {
+        if ($referenced.ContainsKey($r)) { continue }
+        $app.Range("B$r").Value2 = $null
+        $app.Range("C$r").Value2 = $null
+        $app.Range("D$r").Value2 = $null
+        $app.Range("E$r").Value2 = $null
+      }
+
+      # Clear unused user-zone rows entirely (A–E)
+      $userStart = $templateEnd + 1
+      for ($r = $userStart; $r -le $endRow; $r++) {
+        if ($referenced.ContainsKey($r)) { continue }
+        $app.Range("A$r").Value2 = $null
+        $app.Range("B$r").Value2 = $null
+        $app.Range("C$r").Value2 = $null
+        $app.Range("D$r").Value2 = $null
+        $app.Range("E$r").Value2 = $null
       }
     }
 
-    if ($inputs.customRows) {
+    if ($null -ne $inputs.customRows) {
       $cust = $wb.Worksheets.Item("Custom_Equipment")
-      foreach ($row in $inputs.customRows) {
+      $ctable = $inputs.customTable
+      $cStart = 4
+      $cEnd = 23
+      if ($null -ne $ctable) {
+        if ($null -ne $ctable.startRow) { $cStart = [int]$ctable.startRow }
+        if ($null -ne $ctable.endRow) { $cEnd = [int]$ctable.endRow }
+      }
+
+      $customRef = @{}
+      $customRowsList = @($inputs.customRows)
+      Write-Output "COM_CUSTOM rows=$($customRowsList.Count)"
+      foreach ($row in $customRowsList) {
         $r = [int]$row.excelRow
-        if ($r -lt 4) { continue }
+        if ($r -lt $cStart -or $r -gt $cEnd) { continue }
+        $customRef[$r] = $true
         Set-CellValue $cust ("A" + $r) $row.name
-        if ($null -ne $row.watts) { Set-CellValue $cust ("B" + $r) ([double]$row.watts) }
-        if ($null -ne $row.loadFactor) { Set-CellValue $cust ("C" + $r) ([double]$row.loadFactor) }
-        if ($null -ne $row.qty) { Set-CellValue $cust ("D" + $r) ([double]$row.qty) }
-        if ($null -ne $row.hours) { Set-CellValue $cust ("E" + $r) ([double]$row.hours) }
+        # Always write numerics (including 0). Avoid $null -ne checks that miss JSON note properties.
+        $cust.Range("B$r").Value2 = [double](0 + $row.watts)
+        $cust.Range("C$r").Value2 = [double](0 + $row.loadFactor)
+        $cust.Range("D$r").Value2 = [double](0 + $row.qty)
+        $cust.Range("E$r").Value2 = [double](0 + $row.hours)
+        Write-Output "COM_CUSTOM r=$r B=$($cust.Range('B'+$r).Value2) C=$($cust.Range('C'+$r).Value2) D=$($cust.Range('D'+$r).Value2) E=$($cust.Range('E'+$r).Value2)"
+      }
+
+      for ($r = $cStart; $r -le $cEnd; $r++) {
+        if ($customRef.ContainsKey($r)) { continue }
+        $cust.Range("A$r").Value2 = $null
+        $cust.Range("B$r").Value2 = $null
+        $cust.Range("C$r").Value2 = $null
+        $cust.Range("D$r").Value2 = $null
+        $cust.Range("E$r").Value2 = $null
       }
     }
   } else {
@@ -145,15 +227,23 @@ try {
   try { Materialize-RangeValues $wb.Worksheets.Item("Battery_Sizing") @("B5", "B6", "B8", "B9", "B10", "B11", "B12") } catch { }
   try { Materialize-RangeValues $wb.Worksheets.Item("Diesel_Economics") @("B5", "B6", "B7", "B8", "B9") } catch { }
   try { Materialize-RangeValues $wb.Worksheets.Item("Financial_Model") @("B4", "B5", "B6", "B7", "B8", "B9", "B10", "B11", "B12", "B13") } catch { }
-  try { Materialize-RangeValues $wb.Worksheets.Item("Appliance_Input") @("L4", "L5", "L6") } catch { }
-  try { Materialize-RangeValues $wb.Worksheets.Item("Custom_Equipment") @("M4", "M5", "M7") } catch { }
+  try { Materialize-RangeValues $wb.Worksheets.Item("Appliance_Input") @(
+      "L4", "L5", "L6",
+      "G4", "G5", "G6", "G7", "G8", "G9", "G10", "G11", "G12", "G13", "G14", "G15", "G16", "G17", "G18", "G19", "G20",
+      "G21", "G22", "G23", "G24", "G25", "G26", "G27", "G28", "G29", "G30", "G31", "G32", "G33", "G34", "G35", "G36", "G37", "G38", "G39", "G40"
+    ) } catch { }
+  try { Materialize-RangeValues $wb.Worksheets.Item("Custom_Equipment") @(
+      "M4", "M5", "M7",
+      "G4", "G5", "G6", "G7", "G8", "G9", "G10", "G11", "G12", "G13", "G14", "G15", "G16", "G17", "G18", "G19", "G20", "G21", "G22", "G23"
+    ) } catch { }
   try {
     Materialize-RangeValues $wb.Worksheets.Item("Outputs") @(
       "B4", "B5", "B6", "B7", "B8", "B9",
       "B10", "B11", "B12", "B13", "B14", "B15", "B16", "B17", "B18", "B19", "B20",
       "B21", "B22", "B23", "B24", "B25",
       "B27", "B28", "B29",
-      "B31"
+      "B31",
+      "B34", "B35", "B36", "B41", "B46"
     )
   } catch { }
 
@@ -161,7 +251,9 @@ try {
     $loadB4 = $wb.Worksheets.Item("Load_Estimation").Range("B4").Value2
     $loadB8 = $wb.Worksheets.Item("Load_Estimation").Range("B8").Value2
     $outB10 = $wb.Worksheets.Item("Outputs").Range("B10").Value2
-    Write-Output "COM_DIAG method=$loadB4 monthly=$loadB8 solar=$outB10"
+    $outB11 = $wb.Worksheets.Item("Outputs").Range("B11").Value2
+    $uiB25 = $wb.Worksheets.Item("User_Inputs").Range("B25").Value2
+    Write-Output "COM_DIAG method=$loadB4 monthly=$loadB8 solar=$outB10 battery=$outB11 backup=$uiB25"
   } catch {
     Write-Output "COM_DIAG unavailable"
   }

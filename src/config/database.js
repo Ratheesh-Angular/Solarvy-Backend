@@ -80,7 +80,39 @@ async function initSchema(db) {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS admin_users (
+      id SERIAL PRIMARY KEY,
+      username VARCHAR(100) UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key VARCHAR(100) PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
   `);
+}
+
+async function seedAdminUser() {
+  const { seedAdminUser: seed } = await import("../services/adminAuth.service.js");
+  await seed();
+}
+
+async function seedAppSettings() {
+  const {
+    BILL_ANALYZER_SETTING_KEY,
+    DEFAULT_BILL_ANALYZER_SYSTEM_PROMPT,
+  } = await import("./billAnalyzerDefaults.js");
+
+  await pool.query(
+    `INSERT INTO app_settings (key, value, updated_at)
+     VALUES ($1, $2, NOW())
+     ON CONFLICT (key) DO NOTHING`,
+    [BILL_ANALYZER_SETTING_KEY, DEFAULT_BILL_ANALYZER_SYSTEM_PROMPT],
+  );
 }
 
 export function getPool() {
@@ -94,6 +126,8 @@ export async function connectDatabase() {
   pool = new Pool(getPoolConfig());
   await pool.query("SELECT 1");
   await initSchema(pool);
+  await seedAdminUser();
+  await seedAppSettings();
   console.log("PostgreSQL database connected");
 }
 

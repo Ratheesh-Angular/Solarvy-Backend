@@ -201,6 +201,11 @@ async function loadCatalogs() {
 }
 
 /** Catalogs cached by template file mtime — client workbook updates picked up automatically. */
+export function invalidateCatalogCache() {
+  cache = null;
+  cacheMtimeMs = 0;
+}
+
 export async function getCatalogs() {
   const templatePath = getTemplatePath();
   const stat = fs.statSync(templatePath);

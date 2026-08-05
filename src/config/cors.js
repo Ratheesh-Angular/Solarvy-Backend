@@ -47,7 +47,7 @@ export function createCorsOptions() {
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
-    exposedHeaders: ["Content-Length"],
+    exposedHeaders: ["Content-Length", "Content-Disposition"],
     optionsSuccessStatus: 204,
     maxAge: 86400,
   };

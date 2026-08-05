@@ -1,6 +1,9 @@
 import { Router } from "express";
 import { getCatalogs } from "../services/excelReader.service.js";
-import { getTemplatePrefill } from "../services/excelCalculator.service.js";
+import {
+  getLiveSummary,
+  getTemplatePrefill,
+} from "../services/excelCalculator.service.js";
 
 const router = Router();
 
@@ -27,6 +30,16 @@ router.post("/template-prefill", async (req, res, next) => {
 
     const prefill = await getTemplatePrefill(propertyType, template);
     res.json({ success: true, data: prefill });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/live-summary", async (req, res, next) => {
+  try {
+    const formData = req.body.formData ?? req.body;
+    const summary = await getLiveSummary(formData);
+    res.json({ success: true, data: summary });
   } catch (error) {
     next(error);
   }

@@ -18,6 +18,8 @@ import {
   CUSTOM_TABLE,
   OUTPUT_CELLS,
   SUMMARY_CELLS,
+  ESTIMATED_ANNUAL_LOAD_CELLS,
+  OUTPUT_LIVE_SUMMARY_CELLS,
 } from "../config/excelMapping.js";
 import { cellValue } from "./excelReader.service.js";
 
@@ -111,6 +113,15 @@ function buildComInputsPayload(formData) {
     monthlySpend: null,
     applianceRows: null,
     customRows: null,
+    applianceTable: {
+      startRow: APPLIANCE_TABLE.startRow,
+      templateEndRow: APPLIANCE_TABLE.templateEndRow ?? 20,
+      endRow: APPLIANCE_TABLE.endRow,
+    },
+    customTable: {
+      startRow: CUSTOM_TABLE.startRow,
+      endRow: CUSTOM_TABLE.endRow,
+    },
   };
 
   if (formData.inputMethod === "bill" && formData.bill) {
@@ -161,7 +172,7 @@ function buildComInputsPayload(formData) {
           excelRow,
           name: row.kind || row.name || "",
           watts: Number(row.power) || 0,
-          loadFactor: (Number(row.loadFactorPct) || 0) / 100,
+          loadFactor: customLoadFactorFromPct(row.loadFactorPct),
           qty: Number(row.qty) || 0,
           hours: Number(row.hours) || 0,
         };
@@ -230,11 +241,8 @@ async function recalculateWithLibreOffice(inputPath) {
   return { outPath, cleanupDir: outDir };
 }
 
-/** Pick LibreOffice on server, Excel COM on Windows dev when LibreOffice is missing. */
+/** Prefer Excel COM on Windows (matches desktop Excel); LibreOffice is fallback. */
 async function recalculateWorkbook(inputPath, formData = null) {
-  if (libreOfficeAvailable()) {
-    return recalculateWithLibreOffice(inputPath);
-  }
   if (excelComAvailable()) {
     console.log("Using Microsoft Excel COM for local recalculation");
     let inputsJsonPath = null;
@@ -255,9 +263,17 @@ async function recalculateWorkbook(inputPath, formData = null) {
       if (inputsJsonPath) safeUnlink(inputsJsonPath);
     }
   }
+  if (libreOfficeAvailable()) {
+    console.log("Using LibreOffice for recalculation");
+    return recalculateWithLibreOffice(inputPath);
+  }
   throw new Error(
     "No Excel recalculation engine found. Install LibreOffice (npm run setup:local) or use Windows with Microsoft Excel.",
   );
+}
+
+function useComDirectWrites() {
+  return excelComAvailable();
 }
 
 function safeUnlink(p) {
@@ -277,6 +293,28 @@ function toNumber(value) {
   if (value === null || value === undefined || value === "") return null;
   const n = Number(String(value).replace(/[^\d.-]/g, ""));
   return Number.isFinite(n) ? n : null;
+}
+
+/** UI loadFactorPct 0–100 → Excel Appliance duty fraction (0–1). 0 stays 0. */
+function loadFactorFractionFromPct(loadFactorPct) {
+  if (loadFactorPct === null || loadFactorPct === undefined || loadFactorPct === "") {
+    return 1;
+  }
+  const n = Number(loadFactorPct);
+  if (!Number.isFinite(n)) return 1;
+  return n / 100;
+}
+
+/**
+ * Custom_Equipment!C is used raw in Watts×Load_Factor×Qty×Hours/1000 (no ÷100).
+ * Write the same 0–100 number the UI shows.
+ */
+function customLoadFactorFromPct(loadFactorPct) {
+  if (loadFactorPct === null || loadFactorPct === undefined || loadFactorPct === "") {
+    return 0;
+  }
+  const n = Number(loadFactorPct);
+  return Number.isFinite(n) ? n : 0;
 }
 
 /** Write assessment formData into a workbook copy. */
@@ -327,7 +365,7 @@ function writeInputs(workbook, formData) {
     writeTableRows(workbook, CUSTOM_TABLE, formData.custom.rows, (row) => ({
       name: row.kind,
       watts: Number(row.power) || 0,
-      loadFactor: (Number(row.loadFactorPct) || 100) / 100,
+      loadFactor: customLoadFactorFromPct(row.loadFactorPct),
       qty: Number(row.qty) || 0,
       hours: Number(row.hours) || 0,
     }));
@@ -521,10 +559,53 @@ function readOutputs(workbook) {
       if (key === "sheet") continue;
       summary[method][key] = cellValue(sheet.getCell(ref));
     }
+    const annualLoadRef = ESTIMATED_ANNUAL_LOAD_CELLS[method];
+    if (annualLoadRef) {
+      summary[method].estimatedAnnualLoadKwh = cellValue(
+        outputs.getCell(annualLoadRef),
+      );
+    }
   }
+
+  // Monthly Bill live-summary card: Outputs!B36
+  summary.bill = summary.bill || {};
+  summary.bill.estimatedMonthlySpend = cellValue(
+    outputs.getCell(OUTPUT_LIVE_SUMMARY_CELLS.estimatedMonthlySpend),
+  );
+
   results.summary = summary;
 
   return results;
+}
+
+/**
+ * Per-row Daily_kWh from Appliance_Input!G or Custom_Equipment!G after recalc.
+ */
+function readDailyKwhByRow(workbook, inputMethod) {
+  const table =
+    inputMethod === "custom"
+      ? CUSTOM_TABLE
+      : inputMethod === "appliance"
+        ? APPLIANCE_TABLE
+        : null;
+  if (!table?.columns?.dailyKwh) return [];
+
+  const sheet = workbook.getWorksheet(table.sheet);
+  if (!sheet) return [];
+
+  const rows = [];
+  for (let r = table.startRow; r <= table.endRow; r++) {
+    const raw = cellValue(sheet.getCell(`${table.columns.dailyKwh}${r}`));
+    const dailyKwh =
+      raw === null || raw === undefined || raw === ""
+        ? null
+        : Number(raw);
+    rows.push({
+      excelRow: r,
+      dailyKwh: Number.isFinite(dailyKwh) ? dailyKwh : null,
+    });
+  }
+  return rows;
 }
 
 function numOr(value, fallback = 0) {
@@ -644,6 +725,9 @@ function deriveAssessmentOutputs(workbook, formData) {
 
   // Load_Estimation!B9 = monthly * 12
   const annualLoad = selectedMonthly * 12;
+  const billAnnualLoad = billMonthly * 12;
+  const applianceAnnualLoad = applianceMonthly * 12;
+  const customAnnualLoad = customMonthly * 12;
 
   const yieldKwhPerKwp = Math.max(numOr(cellValue(userInputs.getCell("B42")), 1450), 1);
   const targetSolarShare = Math.min(
@@ -819,7 +903,10 @@ function deriveAssessmentOutputs(workbook, formData) {
     gridOffset,
     dieselReduction,
     summary: {
-      bill: { monthlyUsage: billMonthly || null },
+      bill: {
+        monthlyUsage: billMonthly || null,
+        estimatedAnnualLoadKwh: billAnnualLoad || null,
+      },
       appliance: {
         dailyKwh:
           applianceDailyFromForm > 0
@@ -831,6 +918,7 @@ function deriveAssessmentOutputs(workbook, formData) {
                 null,
               ),
         monthlyKwh: applianceMonthly || null,
+        estimatedAnnualLoadKwh: applianceAnnualLoad || null,
       },
       custom: {
         dailyKwh:
@@ -841,6 +929,7 @@ function deriveAssessmentOutputs(workbook, formData) {
                 null,
               ),
         monthlyKwh: customMonthly || null,
+        estimatedAnnualLoadKwh: customAnnualLoad || null,
       },
     },
   };
@@ -976,7 +1065,7 @@ function verifyWrittenInputs(workbook, formData) {
 export async function getTemplatePrefill(propertyType, template) {
   const workPath = newWorkPath("prefill");
   let recalc = null;
-  const useComDirect = !libreOfficeAvailable() && excelComAvailable();
+  const useComDirect = useComDirectWrites();
 
   try {
     fs.copyFileSync(getTemplatePath(), workPath);
@@ -1036,8 +1125,7 @@ export async function calculateAssessment(formData) {
     throw new Error(`Excel template not found: ${templatePath}`);
   }
 
-  const useComDirect =
-    !libreOfficeAvailable() && excelComAvailable();
+  const useComDirect = useComDirectWrites();
 
   async function runOnce() {
     const workPath = newWorkPath("assessment");
@@ -1058,9 +1146,24 @@ export async function calculateAssessment(formData) {
       const result = new ExcelJS.Workbook();
       await result.xlsx.readFile(recalc.outPath);
       const loadCheck = assertLoadEstimationMatches(result, formData);
+      const backupCheck = assertBackupDurationMatches(result, formData);
+      const freshness = {
+        ok: loadCheck.ok && backupCheck.ok,
+        reason: !loadCheck.ok
+          ? loadCheck.reason
+          : !backupCheck.ok
+            ? backupCheck.reason
+            : "ok",
+        loadCheck,
+        backupCheck,
+      };
       const sheetResults = readOutputs(result);
+      sheetResults.rowDailyKwh = readDailyKwhByRow(
+        result,
+        formData.inputMethod,
+      );
 
-      return { workPath, recalc, result, loadCheck, sheetResults };
+      return { workPath, recalc, result, freshness, sheetResults };
     } catch (error) {
       safeUnlink(workPath);
       if (recalc) safeUnlink(recalc.cleanupDir);
@@ -1070,16 +1173,16 @@ export async function calculateAssessment(formData) {
 
   let pass = await runOnce();
   try {
-    if (!pass.loadCheck.ok) {
+    if (!pass.freshness.ok) {
       console.warn(
-        `Excel Load_Estimation stale after recalc (${pass.loadCheck.reason}); retrying with fresh template…`,
+        `Excel Outputs stale after recalc (${pass.freshness.reason}); retrying with fresh template…`,
       );
       safeUnlink(pass.workPath);
       if (pass.recalc) safeUnlink(pass.recalc.cleanupDir);
       pass = await runOnce();
-      if (!pass.loadCheck.ok) {
+      if (!pass.freshness.ok) {
         throw new Error(
-          `Excel Outputs are stale after recalculation: ${pass.loadCheck.reason}. Close Excel if the template is open and try again.`,
+          `Excel Outputs are stale after recalculation: ${pass.freshness.reason}. Close Excel if the template is open and try again.`,
         );
       }
     }
@@ -1098,6 +1201,28 @@ export async function calculateAssessment(formData) {
     safeUnlink(pass.workPath);
     if (pass.recalc) safeUnlink(pass.recalc.cleanupDir);
   }
+}
+
+/**
+ * Live assessment summary: recalculate workbook and read Outputs summary
+ * cells, including estimated annual load (B34 / B41 / B46 by input method).
+ */
+export async function getLiveSummary(formData) {
+  const results = await calculateAssessment(formData);
+  const method = formData.inputMethod || "bill";
+  const methodSummary = results.summary?.[method] || {};
+  const billSummary = results.summary?.bill || {};
+
+  return {
+    inputMethod: method,
+    estimatedAnnualLoadKwh: methodSummary.estimatedAnnualLoadKwh ?? null,
+    estimatedMonthlySpend:
+      method === "bill"
+        ? (billSummary.estimatedMonthlySpend ?? null)
+        : null,
+    summary: results.summary,
+    rowDailyKwh: Array.isArray(results.rowDailyKwh) ? results.rowDailyKwh : [],
+  };
 }
 
 /**
@@ -1122,11 +1247,13 @@ function expectedMonthlyUsage(formData) {
   if (method === "custom") {
     const rows = formData.custom?.rows || [];
     const daily = rows.reduce((sum, row) => {
+      if (row.removed) return sum;
       const qty = Number(row.qty) || 0;
       const hours = Number(row.hours) || 0;
       const power = Number(row.power) || 0;
-      const duty = (Number(row.loadFactorPct) || 100) / 100;
-      return sum + (qty * hours * power * duty) / 1000;
+      // Custom_Equipment Load_Factor is 0–100 (same as UI), not a 0–1 fraction.
+      const loadFactor = Number(row.loadFactorPct) || 0;
+      return sum + (qty * hours * power * loadFactor) / 1000;
     }, 0);
     return daily * 30;
   }
@@ -1134,7 +1261,7 @@ function expectedMonthlyUsage(formData) {
 }
 
 /**
- * After COM recalc, verify Load_Estimation reflects written inputs.
+ * After COM/LibreOffice recalc, verify Load_Estimation reflects written inputs.
  * Prevents saving stale template Outputs as assessment results.
  */
 function assertLoadEstimationMatches(workbook, formData) {
@@ -1181,4 +1308,51 @@ function assertLoadEstimationMatches(workbook, formData) {
   }
 
   return { ok: true, reason: "ok", sheetMethod, sheetMonthly };
+}
+
+/**
+ * Verify backup hours landed in User_Inputs!B25 and Battery_Sizing!B6.
+ * Stale B25=4 (template default) was the root cause of wrong battery/cost/payback.
+ */
+function assertBackupDurationMatches(workbook, formData) {
+  const expected = toNumber(formData.backupDuration);
+  if (expected === null) {
+    return { ok: true, reason: "no backupDuration provided" };
+  }
+
+  const userInputs = workbook.getWorksheet(SHEETS.userInputs);
+  const batterySheet = workbook.getWorksheet("Battery_Sizing");
+  if (!userInputs) {
+    return { ok: false, reason: "User_Inputs sheet missing" };
+  }
+
+  const b25 = Number(
+    cellValue(userInputs.getCell(USER_INPUT_CELLS.backupDuration)),
+  );
+  const b6 = batterySheet
+    ? Number(cellValue(batterySheet.getCell("B6")))
+    : NaN;
+
+  if (Number.isFinite(b25) && Math.abs(b25 - expected) > 0.01) {
+    return {
+      ok: false,
+      reason: `backupDuration User_Inputs!B25=${b25} expected=${expected}`,
+    };
+  }
+
+  if (Number.isFinite(b6) && Math.abs(b6 - expected) > 0.01) {
+    return {
+      ok: false,
+      reason: `backupDuration Battery_Sizing!B6=${b6} expected=${expected}`,
+    };
+  }
+
+  if (!Number.isFinite(b25) && !Number.isFinite(b6)) {
+    return {
+      ok: false,
+      reason: `backupDuration missing expected=${expected}`,
+    };
+  }
+
+  return { ok: true, reason: "ok", b25, b6, expected };
 }

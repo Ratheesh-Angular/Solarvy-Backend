@@ -91,7 +91,14 @@ export const CUSTOM_TABLE = {
   sheet: SHEETS.customEquipment,
   startRow: 4,
   endRow: 23,
-  columns: { name: "A", watts: "B", loadFactor: "C", qty: "D", hours: "E" },
+  columns: {
+    name: "A",
+    watts: "B",
+    loadFactor: "C",
+    qty: "D",
+    hours: "E",
+    dailyKwh: "G",
+  },
 };
 
 /**
@@ -164,4 +171,16 @@ export const SUMMARY_CELLS = {
   bill: { sheet: SHEETS.billInput, monthlyUsage: "B5" },
   appliance: { sheet: SHEETS.applianceInput, dailyKwh: "L4", monthlyKwh: "L5" },
   custom: { sheet: SHEETS.customEquipment, dailyKwh: "M4", monthlyKwh: "M5" },
+};
+
+/** Outputs sheet — estimated annual load (kWh) by input method. */
+export const ESTIMATED_ANNUAL_LOAD_CELLS = {
+  bill: "B34",
+  appliance: "B41",
+  custom: "B46",
+};
+
+/** Outputs sheet — live-summary cards for Monthly Bill. */
+export const OUTPUT_LIVE_SUMMARY_CELLS = {
+  estimatedMonthlySpend: "B36",
 };

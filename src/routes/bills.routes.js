@@ -1,6 +1,6 @@
 import { Router } from "express";
 import multer from "multer";
-import { extractBillValues } from "../services/billExtractor.service.js";
+import { analyzeBillDocument } from "../services/billAnalyzer.service.js";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -16,17 +16,29 @@ router.post("/extract", upload.single("bill"), async (req, res, next) => {
       return;
     }
 
-    const values = await extractBillValues(req.file.buffer);
+    const values = await analyzeBillDocument(req.file.buffer, {
+      mimeType: req.file.mimetype || "application/octet-stream",
+      fileName: req.file.originalname || "bill",
+    });
 
     res.json({
       success: true,
-      message: "Bill processed",
+      message: values.lowConfidence
+        ? "Bill analyzed with low confidence — please verify values"
+        : "Bill processed",
       data: {
         fileName: req.file.originalname,
         ...values,
       },
     });
   } catch (error) {
+    if (
+      error.message?.includes("OPENAI_API_KEY") ||
+      error.message?.includes("Empty bill")
+    ) {
+      res.status(400).json({ success: false, message: error.message });
+      return;
+    }
     next(error);
   }
 });

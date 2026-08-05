@@ -1,4 +1,8 @@
-const REQUIRED_IN_PRODUCTION = ["DATABASE_URL", "FRONTEND_URL"];
+const REQUIRED_IN_PRODUCTION = [
+  "DATABASE_URL",
+  "FRONTEND_URL",
+  "JWT_SECRET",
+];
 
 export function isProduction() {
   return process.env.NODE_ENV === "production";
