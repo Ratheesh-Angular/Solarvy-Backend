@@ -654,6 +654,11 @@ function deriveAssessmentOutputs(workbook, formData) {
     cellValue(userInputs.getCell(USER_INPUT_CELLS.country)) ||
     formData.country ||
     null;
+  const city =
+    cellValue(userInputs.getCell(USER_INPUT_CELLS.state)) ||
+    formData.city ||
+    formData.state ||
+    null;
   const scenarioName = cellValue(userInputs.getCell("B5")) || "Base Case";
   const assessmentId = cellValue(userInputs.getCell("B4"));
 
@@ -845,6 +850,20 @@ function deriveAssessmentOutputs(workbook, formData) {
   const dieselReduction =
     annualLoad > 0 ? (usableSolarKwh * outageFraction) / annualLoad : null;
 
+  // Chart costs: Grid = B30, Diesel = Diesel_Economics!B6, Solar LCOE = B9/(B14*B39)
+  const systemLifeYears = Math.max(
+    numOr(cellValue(userInputs.getCell("B39")), 15),
+    1,
+  );
+  const gridCostPerKwh =
+    gridTariffBase > 0
+      ? gridTariffBase
+      : numOr(cellValue(billInput.getCell("B7")), 0) || null;
+  const solarCostPerKwh =
+    usableSolarKwh > 0 && estimatedSystemCost > 0
+      ? estimatedSystemCost / (usableSolarKwh * systemLifeYears)
+      : null;
+
   let leadType = "Review";
   if (simplePaybackYears !== null) {
     if (simplePaybackYears <= 5) leadType = "Hot";
@@ -880,6 +899,7 @@ function deriveAssessmentOutputs(workbook, formData) {
     assessmentId,
     scenarioName,
     country,
+    city,
     propertyType,
     powerSetup,
     objective,
@@ -902,6 +922,13 @@ function deriveAssessmentOutputs(workbook, formData) {
     solarShare,
     gridOffset,
     dieselReduction,
+    gridCostPerKwh:
+      gridCostPerKwh === null || gridCostPerKwh === 0
+        ? null
+        : round1(gridCostPerKwh),
+    dieselCostPerKwh: round1(dieselCostPerKwh),
+    solarCostPerKwh:
+      solarCostPerKwh === null ? null : round1(solarCostPerKwh),
     summary: {
       bill: {
         monthlyUsage: billMonthly || null,
