@@ -37,6 +37,7 @@ export const SHEETS = {
   billInput: "Bill_Input",
   equipmentDefault: "Equipment Default",
   categoryMenu: "Category Menu",
+  applianceLibrary: "Appliance_Library",
   applianceInput: "Appliance_Input",
   customEquipment: "Custom_Equipment",
   outputs: "Outputs",

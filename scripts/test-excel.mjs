@@ -1,7 +1,8 @@
 /**
  * Quick local smoke test for Excel integration.
  * Run: node scripts/test-excel.mjs
- * Requires: LibreOffice installed, Backend/.env configured, API optional for HTTP tests.
+ * Prefill reads Appliance_Library (no recalc engine).
+ * Full calculation requires LibreOffice or Windows Microsoft Excel.
  */
 import "dotenv/config";
 import { getCatalogs } from "../src/services/excelReader.service.js";

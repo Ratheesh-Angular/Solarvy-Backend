@@ -36,13 +36,28 @@ const WINDOWS_EXCEL_PATHS = [
   "C:\\Program Files (x86)\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
 ];
 
+const LIBREOFFICE_CANDIDATES = [
+  "C:\\Program Files\\LibreOffice\\program\\soffice.com",
+  "/usr/bin/soffice",
+  "/usr/lib/libreoffice/program/soffice",
+];
+
 function libreOfficeAvailable() {
   const configured = getLibreOfficePath();
-  if (configured !== "soffice" && fs.existsSync(configured)) {
+  if (configured && configured !== "soffice" && fs.existsSync(configured)) {
     return true;
   }
-  // Default "soffice" — only trust if the standard Windows path exists
-  return fs.existsSync("C:\\Program Files\\LibreOffice\\program\\soffice.com");
+  return LIBREOFFICE_CANDIDATES.some((p) => fs.existsSync(p));
+}
+
+/** Resolve configured or detected LibreOffice binary for exec. */
+function resolveLibreOfficePath() {
+  const configured = getLibreOfficePath();
+  if (configured && configured !== "soffice" && fs.existsSync(configured)) {
+    return configured;
+  }
+  const found = LIBREOFFICE_CANDIDATES.find((p) => fs.existsSync(p));
+  return found || configured || "soffice";
 }
 
 function excelComAvailable() {
@@ -204,9 +219,10 @@ async function recalculateWithLibreOffice(inputPath) {
   );
   fs.mkdirSync(outDir, { recursive: true });
 
+  const soffice = resolveLibreOfficePath();
   try {
     await execFileAsync(
-      getLibreOfficePath(),
+      soffice,
       [
         "--headless",
         "--norestore",
@@ -220,7 +236,7 @@ async function recalculateWithLibreOffice(inputPath) {
     );
   } catch {
     await execFileAsync(
-      getLibreOfficePath(),
+      soffice,
       [
         "--headless",
         "--norestore",
@@ -1086,56 +1102,124 @@ function verifyWrittenInputs(workbook, formData) {
 }
 
 /**
- * Prefill flow: write property type + template, recalculate, read the
- * Appliance_Input rows the client's CHOOSE/INDEX formulas produce.
+ * Match UI template dropdown labels to Appliance_Library!B names.
+ * Library often stores "2-Bedroom Flat - Standard" while the dropdown is "2-Bedroom Flat".
  */
-export async function getTemplatePrefill(propertyType, template) {
-  const workPath = newWorkPath("prefill");
-  let recalc = null;
-  const useComDirect = useComDirectWrites();
+function libraryTemplateMatches(libraryName, selectedTemplate) {
+  const lib = String(libraryName ?? "")
+    .trim()
+    .toLowerCase();
+  const selected = String(selectedTemplate ?? "")
+    .trim()
+    .toLowerCase();
+  if (!lib || !selected) return false;
+  if (lib === selected) return true;
+  if (lib.startsWith(`${selected} -`)) return true;
+  if (lib.startsWith(`${selected} `)) return true;
+  return false;
+}
 
-  try {
-    fs.copyFileSync(getTemplatePath(), workPath);
+/**
+ * Read template appliances from Appliance_Library (static values).
+ * Avoids INDEX/CHOOSE formulas that LibreOffice often fails to cache for ExcelJS.
+ */
+async function readTemplateAppliancesFromLibrary(propertyType, template) {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(getTemplatePath());
+  const sheet = workbook.getWorksheet(SHEETS.applianceLibrary);
+  if (!sheet) {
+    throw new Error("Appliance_Library sheet not found in Excel template");
+  }
 
-    const prefillForm = {
-      propertyType,
-      template,
-      inputMethod: "appliance",
-    };
+  const property = String(propertyType ?? "").trim();
+  const selected = String(template ?? "").trim();
+  const groups = new Map();
 
-    if (!useComDirect) {
-      const workbook = new ExcelJS.Workbook();
-      await workbook.xlsx.readFile(workPath);
-      const userInputs = workbook.getWorksheet(SHEETS.userInputs);
-      setCell(userInputs, USER_INPUT_CELLS.propertyType, propertyType);
-      setCell(userInputs, USER_INPUT_CELLS.template, template);
-      await workbook.xlsx.writeFile(workPath);
+  for (let r = 4; r <= 500; r++) {
+    const category = cellValue(sheet.getCell(`A${r}`));
+    const templateName = cellValue(sheet.getCell(`B${r}`));
+    const equipment = cellValue(sheet.getCell(`D${r}`));
+
+    if (
+      (category === null || String(category).trim() === "") &&
+      (templateName === null || String(templateName).trim() === "") &&
+      (equipment === null || String(equipment).trim() === "")
+    ) {
+      continue;
     }
 
-    recalc = await recalculateWorkbook(workPath, prefillForm);
+    if (String(category ?? "").trim() !== property) continue;
+    if (!libraryTemplateMatches(templateName, selected)) continue;
 
-    const result = new ExcelJS.Workbook();
-    await result.xlsx.readFile(recalc.outPath);
+    const key = String(templateName).trim();
+    if (!groups.has(key)) groups.set(key, []);
 
-    return {
-      applianceRows: readApplianceInputRows(result, { templateOnly: true }),
-      summary: {
-        dailyKwh: cellValue(
-          result
-            .getWorksheet(SUMMARY_CELLS.appliance.sheet)
-            .getCell(SUMMARY_CELLS.appliance.dailyKwh),
-        ),
-        monthlyKwh: cellValue(
-          result
-            .getWorksheet(SUMMARY_CELLS.appliance.sheet)
-            .getCell(SUMMARY_CELLS.appliance.monthlyKwh),
-        ),
-      },
-    };
-  } finally {
-    safeUnlink(workPath);
-    if (recalc) safeUnlink(recalc.cleanupDir);
+    const name = String(equipment ?? "").trim();
+    if (!isUsableApplianceName(name)) continue;
+
+    const qty = Number(cellValue(sheet.getCell(`E${r}`))) || 0;
+    const watts = Number(cellValue(sheet.getCell(`F${r}`))) || 0;
+    const hours = Number(cellValue(sheet.getCell(`G${r}`))) || 0;
+    const dutyCycle = Number(cellValue(sheet.getCell(`H${r}`)));
+    const duty = Number.isFinite(dutyCycle) ? dutyCycle : 1;
+    const dailyKwh = (qty * watts * hours * duty) / 1000;
+
+    groups.get(key).push({
+      name,
+      qty,
+      watts,
+      hours,
+      dutyCycle: duty,
+      dailyKwh,
+    });
   }
+
+  if (groups.size === 0) {
+    return [];
+  }
+
+  // Prefer exact library name match, otherwise first matched group.
+  const exactKey = [...groups.keys()].find(
+    (key) => key.toLowerCase() === selected.toLowerCase(),
+  );
+  const chosenKey = exactKey || groups.keys().next().value;
+  const templateEnd = APPLIANCE_TABLE.templateEndRow ?? 20;
+  const start = APPLIANCE_TABLE.startRow;
+
+  return groups.get(chosenKey).slice(0, templateEnd - start + 1).map((row, i) => ({
+    ...row,
+    excelRow: start + i,
+    source: "template",
+  }));
+}
+
+/**
+ * Prefill flow: read Appliance_Library rows for the selected property/template.
+ * Does not depend on Excel/LibreOffice recalculating INDEX/CHOOSE into Appliance_Input.
+ */
+export async function getTemplatePrefill(propertyType, template) {
+  const applianceRows = await readTemplateAppliancesFromLibrary(
+    propertyType,
+    template,
+  );
+
+  const dailyKwhRaw = applianceRows.reduce(
+    (sum, row) => sum + (Number(row.dailyKwh) || 0),
+    0,
+  );
+  const dailyKwh = Math.round(dailyKwhRaw * 1e6) / 1e6;
+  const monthlyKwh = Math.round(dailyKwh * 30 * 1e6) / 1e6;
+
+  return {
+    applianceRows: applianceRows.map((row) => ({
+      ...row,
+      dailyKwh: Math.round((Number(row.dailyKwh) || 0) * 1e6) / 1e6,
+    })),
+    summary: {
+      dailyKwh,
+      monthlyKwh,
+    },
+  };
 }
 
 /**
