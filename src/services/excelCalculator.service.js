@@ -209,6 +209,23 @@ function newWorkPath(tag) {
   return path.join(ensureTempDir(), `${id}.xlsx`);
 }
 
+function logLibreOfficeExec(label, soffice, args, result, error = null) {
+  const stdout = result?.stdout ? String(result.stdout).trim() : "";
+  const stderr = result?.stderr ? String(result.stderr).trim() : "";
+  console.log(`[excel-debug] LibreOffice ${label}`);
+  console.log(`[excel-debug] soffice=${soffice}`);
+  console.log(`[excel-debug] args=${JSON.stringify(args)}`);
+  if (stdout) console.log(`[excel-debug] stdout=${stdout}`);
+  if (stderr) console.warn(`[excel-debug] stderr=${stderr}`);
+  if (error) {
+    console.warn(
+      `[excel-debug] exec error: ${error.message || error}${
+        error.code != null ? ` code=${error.code}` : ""
+      }`,
+    );
+  }
+}
+
 /**
  * Recalculate a workbook with LibreOffice headless (production / Linux EC2).
  */
@@ -220,38 +237,74 @@ async function recalculateWithLibreOffice(inputPath) {
   fs.mkdirSync(outDir, { recursive: true });
 
   const soffice = resolveLibreOfficePath();
+  const forceArgs = [
+    "--headless",
+    "--norestore",
+    "--convert-to",
+    'xlsx:Calc MS Excel 2007 XML:{"RecalcOptions":{"type":"string","value":"force"}}',
+    "--outdir",
+    outDir,
+    inputPath,
+  ];
+  const plainArgs = [
+    "--headless",
+    "--norestore",
+    "--convert-to",
+    "xlsx",
+    "--outdir",
+    outDir,
+    inputPath,
+  ];
+
+  console.log(
+    `[excel-debug] LibreOffice recalc start input=${inputPath} outDir=${outDir} timeoutMs=${getCalcTimeoutMs()}`,
+  );
+
   try {
-    await execFileAsync(
+    const forceResult = await execFileAsync(soffice, forceArgs, {
+      timeout: getCalcTimeoutMs(),
+      windowsHide: true,
+    });
+    logLibreOfficeExec("force-recalc ok", soffice, forceArgs, forceResult);
+  } catch (forceError) {
+    logLibreOfficeExec(
+      "force-recalc failed; falling back to plain xlsx",
       soffice,
-      [
-        "--headless",
-        "--norestore",
-        "--convert-to",
-        'xlsx:Calc MS Excel 2007 XML:{"RecalcOptions":{"type":"string","value":"force"}}',
-        "--outdir",
-        outDir,
-        inputPath,
-      ],
-      { timeout: getCalcTimeoutMs(), windowsHide: true },
+      forceArgs,
+      {
+        stdout: forceError.stdout,
+        stderr: forceError.stderr,
+      },
+      forceError,
     );
-  } catch {
-    await execFileAsync(
-      soffice,
-      [
-        "--headless",
-        "--norestore",
-        "--convert-to",
-        "xlsx",
-        "--outdir",
-        outDir,
-        inputPath,
-      ],
-      { timeout: getCalcTimeoutMs(), windowsHide: true },
-    );
+    try {
+      const plainResult = await execFileAsync(soffice, plainArgs, {
+        timeout: getCalcTimeoutMs(),
+        windowsHide: true,
+      });
+      logLibreOfficeExec("plain-convert ok", soffice, plainArgs, plainResult);
+    } catch (plainError) {
+      logLibreOfficeExec(
+        "plain-convert failed",
+        soffice,
+        plainArgs,
+        {
+          stdout: plainError.stdout,
+          stderr: plainError.stderr,
+        },
+        plainError,
+      );
+      throw plainError;
+    }
   }
 
   const outPath = path.join(outDir, path.basename(inputPath));
-  if (!fs.existsSync(outPath)) {
+  const outExists = fs.existsSync(outPath);
+  const outSize = outExists ? fs.statSync(outPath).size : 0;
+  console.log(
+    `[excel-debug] LibreOffice outPath=${outPath} exists=${outExists} size=${outSize}`,
+  );
+  if (!outExists) {
     throw new Error("LibreOffice did not produce a recalculated workbook");
   }
   return { outPath, cleanupDir: outDir };
@@ -280,7 +333,9 @@ async function recalculateWorkbook(inputPath, formData = null) {
     }
   }
   if (libreOfficeAvailable()) {
-    console.log("Using LibreOffice for recalculation");
+    console.log(
+      `Using LibreOffice for recalculation (path=${resolveLibreOfficePath()})`,
+    );
     return recalculateWithLibreOffice(inputPath);
   }
   throw new Error(
@@ -1080,14 +1135,27 @@ function verifyWrittenInputs(workbook, formData) {
   const actualProperty = cellValue(
     userInputs.getCell(USER_INPUT_CELLS.propertyType),
   );
+  const expectedMethod = INPUT_METHOD_LABELS[formData.inputMethod] || null;
+  const actualMethod = cellValue(
+    userInputs.getCell(USER_INPUT_CELLS.inputMethod),
+  );
   const expectedUsage = toNumber(formData.bill?.monthlyUsage);
   const actualUsage = cellValue(
     userInputs.getCell(USER_INPUT_CELLS.monthlyUsageKwh),
   );
 
+  console.log(
+    `[excel-debug] verifyWrittenInputs property expected="${expectedProperty}" actual="${actualProperty}" method expected="${expectedMethod}" actual="${actualMethod}" usage expected=${expectedUsage} actual=${actualUsage}`,
+  );
+
   if (expectedProperty && actualProperty !== expectedProperty) {
     console.warn(
       `Excel write verify: propertyType expected "${expectedProperty}" got "${actualProperty}"`,
+    );
+  }
+  if (expectedMethod && actualMethod !== expectedMethod) {
+    console.warn(
+      `Excel write verify: inputMethod expected "${expectedMethod}" got "${actualMethod}"`,
     );
   }
   if (
@@ -1222,6 +1290,59 @@ export async function getTemplatePrefill(propertyType, template) {
   };
 }
 
+function snapshotKeyCells(workbook, label, formData = null) {
+  const userInputs = workbook.getWorksheet(SHEETS.userInputs);
+  const billInput = workbook.getWorksheet(SHEETS.billInput);
+  const loadSheet = workbook.getWorksheet("Load_Estimation");
+  const outputs = workbook.getWorksheet(SHEETS.outputs);
+
+  const snap = {
+    label,
+    inputMethodRequested: formData?.inputMethod ?? null,
+    inputMethodLabelExpected:
+      formData?.inputMethod != null
+        ? INPUT_METHOD_LABELS[formData.inputMethod] || formData.inputMethod
+        : null,
+    userInputs_B10_propertyType: userInputs
+      ? cellValue(userInputs.getCell(USER_INPUT_CELLS.propertyType))
+      : null,
+    userInputs_B11_template: userInputs
+      ? cellValue(userInputs.getCell(USER_INPUT_CELLS.template))
+      : null,
+    userInputs_B15_inputMethod: userInputs
+      ? cellValue(userInputs.getCell(USER_INPUT_CELLS.inputMethod))
+      : null,
+    userInputs_B18_monthlyUsageKwh: userInputs
+      ? cellValue(userInputs.getCell(USER_INPUT_CELLS.monthlyUsageKwh))
+      : null,
+    userInputs_B25_backupDuration: userInputs
+      ? cellValue(userInputs.getCell(USER_INPUT_CELLS.backupDuration))
+      : null,
+    userInputs_B30_gridTariff: userInputs
+      ? cellValue(userInputs.getCell(USER_INPUT_CELLS.gridTariff))
+      : null,
+    billInput_B6_monthlySpend: billInput
+      ? cellValue(billInput.getCell(BILL_INPUT_CELLS.monthlySpend))
+      : null,
+    loadEstimation_B4_method: loadSheet
+      ? cellValue(loadSheet.getCell("B4"))
+      : null,
+    loadEstimation_B8_monthly: loadSheet
+      ? cellValue(loadSheet.getCell("B8"))
+      : null,
+    outputs_B34_billAnnualLoad: outputs
+      ? cellValue(outputs.getCell(ESTIMATED_ANNUAL_LOAD_CELLS.bill))
+      : null,
+    outputs_B36_estimatedMonthlySpend: outputs
+      ? cellValue(outputs.getCell(OUTPUT_LIVE_SUMMARY_CELLS.estimatedMonthlySpend))
+      : null,
+    expectedMonthlyUsage: formData ? expectedMonthlyUsage(formData) : null,
+  };
+
+  console.log(`[excel-debug] ${label}: ${JSON.stringify(snap)}`);
+  return snap;
+}
+
 /**
  * Full calculation flow: write all inputs, recalculate, read Outputs sheet.
  * Results come from Excel only — no Node sizing/financial derivation.
@@ -1237,25 +1358,35 @@ export async function calculateAssessment(formData) {
   }
 
   const useComDirect = useComDirectWrites();
+  console.log(
+    `[excel-debug] calculateAssessment start method=${formData?.inputMethod} property=${formData?.propertyType} template=${formData?.template} useComDirect=${useComDirect} templatePath=${templatePath}`,
+  );
 
-  async function runOnce() {
+  async function runOnce(passLabel) {
     const workPath = newWorkPath("assessment");
     let recalc = null;
     try {
       fs.copyFileSync(templatePath, workPath);
+      console.log(`[excel-debug] ${passLabel} copied template → ${workPath}`);
 
       if (!useComDirect) {
         const workbook = new ExcelJS.Workbook();
         await workbook.xlsx.readFile(workPath);
+        snapshotKeyCells(workbook, `${passLabel} before-write`, formData);
         writeInputs(workbook, formData);
         verifyWrittenInputs(workbook, formData);
+        snapshotKeyCells(workbook, `${passLabel} after-write`, formData);
         await workbook.xlsx.writeFile(workPath);
+        console.log(
+          `[excel-debug] ${passLabel} wrote inputs workSize=${fs.statSync(workPath).size}`,
+        );
       }
 
       recalc = await recalculateWorkbook(workPath, formData);
 
       const result = new ExcelJS.Workbook();
       await result.xlsx.readFile(recalc.outPath);
+      snapshotKeyCells(result, `${passLabel} after-recalc`, formData);
       const loadCheck = assertLoadEstimationMatches(result, formData);
       const backupCheck = assertBackupDurationMatches(result, formData);
       const freshness = {
@@ -1268,6 +1399,9 @@ export async function calculateAssessment(formData) {
         loadCheck,
         backupCheck,
       };
+      console.log(
+        `[excel-debug] ${passLabel} freshness ok=${freshness.ok} reason=${freshness.reason} load=${JSON.stringify(loadCheck)} backup=${JSON.stringify(backupCheck)}`,
+      );
       const sheetResults = readOutputs(result);
       sheetResults.rowDailyKwh = readDailyKwhByRow(
         result,
@@ -1276,13 +1410,16 @@ export async function calculateAssessment(formData) {
 
       return { workPath, recalc, result, freshness, sheetResults };
     } catch (error) {
+      console.error(
+        `[excel-debug] ${passLabel} failed: ${error.message || error}`,
+      );
       safeUnlink(workPath);
       if (recalc) safeUnlink(recalc.cleanupDir);
       throw error;
     }
   }
 
-  let pass = await runOnce();
+  let pass = await runOnce("pass1");
   try {
     if (!pass.freshness.ok) {
       console.warn(
@@ -1290,7 +1427,7 @@ export async function calculateAssessment(formData) {
       );
       safeUnlink(pass.workPath);
       if (pass.recalc) safeUnlink(pass.recalc.cleanupDir);
-      pass = await runOnce();
+      pass = await runOnce("pass2");
       if (!pass.freshness.ok) {
         throw new Error(
           `Excel Outputs are stale after recalculation: ${pass.freshness.reason}. Close Excel if the template is open and try again.`,
@@ -1319,12 +1456,15 @@ export async function calculateAssessment(formData) {
  * cells, including estimated annual load (B34 / B41 / B46 by input method).
  */
 export async function getLiveSummary(formData) {
+  console.log(
+    `[excel-debug] getLiveSummary request method=${formData?.inputMethod} bill.monthlyUsage=${formData?.bill?.monthlyUsage} bill.monthlySpend=${formData?.bill?.monthlySpend} roofArea=${formData?.roofArea}`,
+  );
   const results = await calculateAssessment(formData);
   const method = formData.inputMethod || "bill";
   const methodSummary = results.summary?.[method] || {};
   const billSummary = results.summary?.bill || {};
 
-  return {
+  const payload = {
     inputMethod: method,
     estimatedAnnualLoadKwh: methodSummary.estimatedAnnualLoadKwh ?? null,
     estimatedMonthlySpend:
@@ -1334,6 +1474,10 @@ export async function getLiveSummary(formData) {
     summary: results.summary,
     rowDailyKwh: Array.isArray(results.rowDailyKwh) ? results.rowDailyKwh : [],
   };
+  console.log(
+    `[excel-debug] getLiveSummary ok annualLoad=${payload.estimatedAnnualLoadKwh} monthlySpend=${payload.estimatedMonthlySpend}`,
+  );
+  return payload;
 }
 
 /**
