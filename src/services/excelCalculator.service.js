@@ -26,6 +26,14 @@ import { cellValue } from "./excelReader.service.js";
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+function excelDebugEnabled() {
+  return process.env.EXCEL_DEBUG === "1";
+}
+
+function excelDebugLog(...args) {
+  if (excelDebugEnabled()) console.log(...args);
+}
+
 const EXCEL_COM_SCRIPT = path.resolve(
   __dirname,
   "../../scripts/recalc-excel-com.ps1",
@@ -210,6 +218,14 @@ function newWorkPath(tag) {
 }
 
 function logLibreOfficeExec(label, soffice, args, result, error = null) {
+  if (!excelDebugEnabled()) {
+    if (error) {
+      console.warn(
+        `[excel-debug] LibreOffice ${label}: ${error.message || error}`,
+      );
+    }
+    return;
+  }
   const stdout = result?.stdout ? String(result.stdout).trim() : "";
   const stderr = result?.stderr ? String(result.stderr).trim() : "";
   console.log(`[excel-debug] LibreOffice ${label}`);
@@ -256,7 +272,7 @@ async function recalculateWithLibreOffice(inputPath) {
     inputPath,
   ];
 
-  console.log(
+  excelDebugLog(
     `[excel-debug] LibreOffice recalc start input=${inputPath} outDir=${outDir} timeoutMs=${getCalcTimeoutMs()}`,
   );
 
@@ -301,7 +317,7 @@ async function recalculateWithLibreOffice(inputPath) {
   const outPath = path.join(outDir, path.basename(inputPath));
   const outExists = fs.existsSync(outPath);
   const outSize = outExists ? fs.statSync(outPath).size : 0;
-  console.log(
+  excelDebugLog(
     `[excel-debug] LibreOffice outPath=${outPath} exists=${outExists} size=${outSize}`,
   );
   if (!outExists) {
@@ -1004,6 +1020,12 @@ function deriveAssessmentOutputs(workbook, formData) {
       bill: {
         monthlyUsage: billMonthly || null,
         estimatedAnnualLoadKwh: billAnnualLoad || null,
+        // Outputs!B36 — prefer user-entered spend, else usage × tariff.
+        estimatedMonthlySpend:
+          toNumber(formData.bill?.monthlySpend) ??
+          (billMonthly > 0 && effectiveTariff > 0
+            ? Math.round(billMonthly * effectiveTariff)
+            : null),
       },
       appliance: {
         dailyKwh:
@@ -1081,9 +1103,10 @@ function sheetSizingLooksFresh(sheetResults, derived) {
  * Otherwise use Node derivation (aligned to live Excel formulas) so stale
  * template caches cannot win over the written assessment inputs.
  */
-function mergeOutputResults(sheetResults, derived) {
+function mergeOutputResults(sheetResults, derived, { forceDerived = false } = {}) {
   const merged = { ...sheetResults };
-  const trustSheet = sheetSizingLooksFresh(sheetResults, derived);
+  const trustSheet =
+    !forceDerived && sheetSizingLooksFresh(sheetResults, derived);
 
   for (const [key, value] of Object.entries(derived)) {
     if (key === "summary") {
@@ -1144,7 +1167,7 @@ function verifyWrittenInputs(workbook, formData) {
     userInputs.getCell(USER_INPUT_CELLS.monthlyUsageKwh),
   );
 
-  console.log(
+  excelDebugLog(
     `[excel-debug] verifyWrittenInputs property expected="${expectedProperty}" actual="${actualProperty}" method expected="${expectedMethod}" actual="${actualMethod}" usage expected=${expectedUsage} actual=${actualUsage}`,
   );
 
@@ -1291,6 +1314,8 @@ export async function getTemplatePrefill(propertyType, template) {
 }
 
 function snapshotKeyCells(workbook, label, formData = null) {
+  if (!excelDebugEnabled()) return null;
+
   const userInputs = workbook.getWorksheet(SHEETS.userInputs);
   const billInput = workbook.getWorksheet(SHEETS.billInput);
   const loadSheet = workbook.getWorksheet("Load_Estimation");
@@ -1344,12 +1369,50 @@ function snapshotKeyCells(workbook, label, formData = null) {
 }
 
 /**
+ * Per-row Daily_kWh from form inputs when LibreOffice leaves formula caches stale.
+ */
+function deriveRowDailyKwhFromForm(formData) {
+  const method = formData?.inputMethod;
+  if (method === "appliance") {
+    return (formData.appliance?.rows || [])
+      .filter((row) => Number.isFinite(Number(row.excelRow)))
+      .map((row) => {
+        const qty = Number(row.qty) || 0;
+        const hours = Number(row.hours) || 0;
+        const power = Number(row.power) || 0;
+        const duty = (Number(row.loadFactorPct) || 100) / 100;
+        return {
+          excelRow: Number(row.excelRow),
+          dailyKwh: (qty * hours * power * duty) / 1000,
+        };
+      });
+  }
+  if (method === "custom") {
+    return (formData.custom?.rows || [])
+      .filter((row) => !row.removed && Number.isFinite(Number(row.excelRow)))
+      .map((row) => {
+        const qty = Number(row.qty) || 0;
+        const hours = Number(row.hours) || 0;
+        const power = Number(row.power) || 0;
+        const loadFactor = Number(row.loadFactorPct) || 0;
+        return {
+          excelRow: Number(row.excelRow),
+          dailyKwh: (qty * hours * power * loadFactor) / 1000,
+        };
+      });
+  }
+  return [];
+}
+
+/**
  * Full calculation flow: write all inputs, recalculate, read Outputs sheet.
- * Results come from Excel only — no Node sizing/financial derivation.
+ * Results come from Excel only when recalc freshness checks pass.
+ * On LibreOffice/COM stale formula caches, fall back to Node derivation
+ * aligned to the live workbook formulas (same as local Excel COM intent).
  *
  * Windows/COM: copy template → COM writes inputs + recalcs (ExcelJS writes
  * produce workbooks COM often cannot open).
- * LibreOffice: ExcelJS writeInputs → soffice recalc → read.
+ * LibreOffice: ExcelJS writeInputs → soffice recalc → read → derive if stale.
  */
 export async function calculateAssessment(formData) {
   const templatePath = getTemplatePath();
@@ -1358,7 +1421,7 @@ export async function calculateAssessment(formData) {
   }
 
   const useComDirect = useComDirectWrites();
-  console.log(
+  excelDebugLog(
     `[excel-debug] calculateAssessment start method=${formData?.inputMethod} property=${formData?.propertyType} template=${formData?.template} useComDirect=${useComDirect} templatePath=${templatePath}`,
   );
 
@@ -1367,7 +1430,7 @@ export async function calculateAssessment(formData) {
     let recalc = null;
     try {
       fs.copyFileSync(templatePath, workPath);
-      console.log(`[excel-debug] ${passLabel} copied template → ${workPath}`);
+      excelDebugLog(`[excel-debug] ${passLabel} copied template → ${workPath}`);
 
       if (!useComDirect) {
         const workbook = new ExcelJS.Workbook();
@@ -1377,7 +1440,7 @@ export async function calculateAssessment(formData) {
         verifyWrittenInputs(workbook, formData);
         snapshotKeyCells(workbook, `${passLabel} after-write`, formData);
         await workbook.xlsx.writeFile(workPath);
-        console.log(
+        excelDebugLog(
           `[excel-debug] ${passLabel} wrote inputs workSize=${fs.statSync(workPath).size}`,
         );
       }
@@ -1399,7 +1462,7 @@ export async function calculateAssessment(formData) {
         loadCheck,
         backupCheck,
       };
-      console.log(
+      excelDebugLog(
         `[excel-debug] ${passLabel} freshness ok=${freshness.ok} reason=${freshness.reason} load=${JSON.stringify(loadCheck)} backup=${JSON.stringify(backupCheck)}`,
       );
       const sheetResults = readOutputs(result);
@@ -1419,20 +1482,25 @@ export async function calculateAssessment(formData) {
     }
   }
 
-  let pass = await runOnce("pass1");
-  try {
-    if (!pass.freshness.ok) {
-      console.warn(
-        `Excel Outputs stale after recalc (${pass.freshness.reason}); retrying with fresh template…`,
-      );
-      safeUnlink(pass.workPath);
-      if (pass.recalc) safeUnlink(pass.recalc.cleanupDir);
-      pass = await runOnce("pass2");
-      if (!pass.freshness.ok) {
-        throw new Error(
-          `Excel Outputs are stale after recalculation: ${pass.freshness.reason}. Close Excel if the template is open and try again.`,
-        );
+  function finalizeResults(pass, { usedDerivation }) {
+    let sheetResults = pass.sheetResults;
+    if (usedDerivation) {
+      const derived = deriveAssessmentOutputs(pass.result, formData);
+      sheetResults = mergeOutputResults(sheetResults, derived, {
+        forceDerived: true,
+      });
+      const derivedRows = deriveRowDailyKwhFromForm(formData);
+      if (derivedRows.length > 0) {
+        sheetResults.rowDailyKwh = derivedRows;
       }
+      sheetResults.calculationSource = "node-derivation";
+      console.warn(
+        `Excel Outputs stale after recalc (${pass.freshness.reason}); using Node derivation fallback.`,
+      );
+    } else {
+      sheetResults.calculationSource = useComDirect
+        ? "excel-com"
+        : "libreoffice";
     }
 
     if (process.env.EXCEL_DERIVE_DEBUG === "1") {
@@ -1441,10 +1509,36 @@ export async function calculateAssessment(formData) {
         "[EXCEL_DERIVE_DEBUG] sheet vs derived solar kWp:",
         pass.sheetResults.recommendedSolarKwp,
         derived.recommendedSolarKwp,
+        "source=",
+        sheetResults.calculationSource,
       );
     }
 
-    return pass.sheetResults;
+    return sheetResults;
+  }
+
+  let pass = await runOnce("pass1");
+  try {
+    if (pass.freshness.ok) {
+      return finalizeResults(pass, { usedDerivation: false });
+    }
+
+    // Excel COM can recover on a fresh template copy; LibreOffice typically
+    // cannot (formula caches stay stale). Skip the expensive second soffice
+    // pass when not using COM.
+    if (useComDirect) {
+      console.warn(
+        `Excel Outputs stale after recalc (${pass.freshness.reason}); retrying with fresh template…`,
+      );
+      safeUnlink(pass.workPath);
+      if (pass.recalc) safeUnlink(pass.recalc.cleanupDir);
+      pass = await runOnce("pass2");
+      if (pass.freshness.ok) {
+        return finalizeResults(pass, { usedDerivation: false });
+      }
+    }
+
+    return finalizeResults(pass, { usedDerivation: true });
   } finally {
     safeUnlink(pass.workPath);
     if (pass.recalc) safeUnlink(pass.recalc.cleanupDir);
@@ -1456,7 +1550,7 @@ export async function calculateAssessment(formData) {
  * cells, including estimated annual load (B34 / B41 / B46 by input method).
  */
 export async function getLiveSummary(formData) {
-  console.log(
+  excelDebugLog(
     `[excel-debug] getLiveSummary request method=${formData?.inputMethod} bill.monthlyUsage=${formData?.bill?.monthlyUsage} bill.monthlySpend=${formData?.bill?.monthlySpend} roofArea=${formData?.roofArea}`,
   );
   const results = await calculateAssessment(formData);
@@ -1473,9 +1567,10 @@ export async function getLiveSummary(formData) {
         : null,
     summary: results.summary,
     rowDailyKwh: Array.isArray(results.rowDailyKwh) ? results.rowDailyKwh : [],
+    calculationSource: results.calculationSource || null,
   };
-  console.log(
-    `[excel-debug] getLiveSummary ok annualLoad=${payload.estimatedAnnualLoadKwh} monthlySpend=${payload.estimatedMonthlySpend}`,
+  excelDebugLog(
+    `[excel-debug] getLiveSummary ok annualLoad=${payload.estimatedAnnualLoadKwh} monthlySpend=${payload.estimatedMonthlySpend} source=${payload.calculationSource}`,
   );
   return payload;
 }
