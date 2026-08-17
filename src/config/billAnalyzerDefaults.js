@@ -1,7 +1,35 @@
 /** Default system prompt for Monthly Bill AI extraction (admin-editable). */
 export const BILL_ANALYZER_SETTING_KEY = "bill_analyzer_system_prompt";
 
-export const DEFAULT_BILL_ANALYZER_SYSTEM_PROMPT = `You are an expert electricity bill analyst.
+export const BILL_ANALYZER_CONTEXT_PREAMBLE_MARKER =
+  "ASSESSMENT CONTEXT AVAILABLE";
+
+export const BILL_ANALYZER_CONTEXT_PREAMBLE = `ASSESSMENT CONTEXT AVAILABLE
+
+Each Analyze Bill request now includes the user's assessment form values and Excel Outputs!B40 monthly energy.
+
+You can write training rules in this prompt that use those values. They are sent as JSON in the user message under ASSESSMENT_CONTEXT.
+
+Available assessment form values:
+- property type, template, country, state (city), power setup, main objective
+- roof area, backup duration
+- bill notes and any bill fields already entered (monthly usage, unit, spend, grid tariff)
+- appliance or custom equipment rows when present
+
+Available Excel value:
+- monthlyEnergyKwh — Outputs!B40 (monthly energy in kWh). May be null if Excel has not computed it yet.
+
+Use printed bill figures for extraction. Use assessment context for sanity checks or any extra rules you define below.
+
+`;
+
+export function withBillAnalyzerContextPreamble(prompt) {
+  const value = String(prompt || "");
+  if (value.includes(BILL_ANALYZER_CONTEXT_PREAMBLE_MARKER)) return value;
+  return `${BILL_ANALYZER_CONTEXT_PREAMBLE}${value}`;
+}
+
+const BILL_ANALYZER_CORE_SYSTEM_PROMPT = `You are an expert electricity bill analyst.
 
 You analyze electricity bill images from Nigeria.
 
@@ -64,6 +92,9 @@ The JSON must match this schema exactly:
   "confidence": 0.0,
   "reasoning": ""
 }`;
+
+export const DEFAULT_BILL_ANALYZER_SYSTEM_PROMPT =
+  withBillAnalyzerContextPreamble(BILL_ANALYZER_CORE_SYSTEM_PROMPT);
 
 export const BILL_ANALYZER_USER_PROMPT = `Extract structured billing data from this electricity bill document.
 Follow the system rules. Return JSON only matching the required schema.`;

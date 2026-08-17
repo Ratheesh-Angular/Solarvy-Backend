@@ -5,6 +5,7 @@ import { loginAdmin } from "../services/adminAuth.service.js";
 import {
   BILL_ANALYZER_SETTING_KEY,
   DEFAULT_BILL_ANALYZER_SYSTEM_PROMPT,
+  withBillAnalyzerContextPreamble,
 } from "../config/billAnalyzerDefaults.js";
 import {
   getSetting,
@@ -133,7 +134,9 @@ router.get("/ai-prompts/bill", requireAdmin, async (_req, res, next) => {
       success: true,
       data: {
         key: BILL_ANALYZER_SETTING_KEY,
-        value: row?.value ?? DEFAULT_BILL_ANALYZER_SYSTEM_PROMPT,
+        value: withBillAnalyzerContextPreamble(
+          row?.value ?? DEFAULT_BILL_ANALYZER_SYSTEM_PROMPT,
+        ),
         updatedAt: row?.updatedAt ?? null,
       },
     });

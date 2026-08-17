@@ -41,6 +41,28 @@ export const SHEETS = {
   applianceInput: "Appliance_Input",
   customEquipment: "Custom_Equipment",
   outputs: "Outputs",
+  strategyComparison: "Strategy_Comparison",
+};
+
+/**
+ * Strategy_Comparison website mapping (rows 12–16, columns B–E).
+ * Formulas copy the summary table B5:F8.
+ */
+export const STRATEGY_COMPARISON = {
+  sheet: SHEETS.strategyComparison,
+  columns: [
+    { col: "B", strategy: "Grid Only" },
+    { col: "C", strategy: "Grid + Generator" },
+    { col: "D", strategy: "Solar + Grid" },
+    { col: "E", strategy: "Solar + Battery + Generator" },
+  ],
+  rows: {
+    annualCost: 12,
+    reliability: 13,
+    dieselUse: 14,
+    payback: 15,
+    recommended: 16,
+  },
 };
 
 /** User_Inputs sheet cells that receive user values. */
@@ -184,4 +206,6 @@ export const ESTIMATED_ANNUAL_LOAD_CELLS = {
 /** Outputs sheet — live-summary cards for Monthly Bill. */
 export const OUTPUT_LIVE_SUMMARY_CELLS = {
   estimatedMonthlySpend: "B36",
+  /** Monthly energy (kWh). */
+  monthlyEnergy: "B40",
 };

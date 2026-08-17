@@ -20,6 +20,7 @@ import {
   SUMMARY_CELLS,
   ESTIMATED_ANNUAL_LOAD_CELLS,
   OUTPUT_LIVE_SUMMARY_CELLS,
+  STRATEGY_COMPARISON,
 } from "../config/excelMapping.js";
 import { cellValue } from "./excelReader.service.js";
 
@@ -654,13 +655,40 @@ function readOutputs(workbook) {
     }
   }
 
-  // Monthly Bill live-summary card: Outputs!B36
+  // Monthly Bill live-summary cards: Outputs!B36 spend, Outputs!B40 monthly energy
   summary.bill = summary.bill || {};
   summary.bill.estimatedMonthlySpend = cellValue(
     outputs.getCell(OUTPUT_LIVE_SUMMARY_CELLS.estimatedMonthlySpend),
   );
+  summary.bill.estimatedMonthlyEnergyKwh = cellValue(
+    outputs.getCell(OUTPUT_LIVE_SUMMARY_CELLS.monthlyEnergy),
+  );
 
   results.summary = summary;
+
+  const strategySheet = workbook.getWorksheet(STRATEGY_COMPARISON.sheet);
+  if (strategySheet) {
+    results.strategyComparison = STRATEGY_COMPARISON.columns.map(
+      ({ col, strategy }) => ({
+        strategy,
+        annualCost: cellValue(
+          strategySheet.getCell(`${col}${STRATEGY_COMPARISON.rows.annualCost}`),
+        ),
+        reliability: cellValue(
+          strategySheet.getCell(`${col}${STRATEGY_COMPARISON.rows.reliability}`),
+        ),
+        dieselUse: cellValue(
+          strategySheet.getCell(`${col}${STRATEGY_COMPARISON.rows.dieselUse}`),
+        ),
+        payback: cellValue(
+          strategySheet.getCell(`${col}${STRATEGY_COMPARISON.rows.payback}`),
+        ),
+        recommended: cellValue(
+          strategySheet.getCell(`${col}${STRATEGY_COMPARISON.rows.recommended}`),
+        ),
+      }),
+    );
+  }
 
   return results;
 }
@@ -1210,13 +1238,143 @@ function libraryTemplateMatches(libraryName, selectedTemplate) {
   return false;
 }
 
+function cellFormula(cell) {
+  if (!cell) return null;
+  if (typeof cell.formula === "string" && cell.formula.trim()) {
+    return cell.formula;
+  }
+  const v = cell.value;
+  if (v && typeof v === "object") {
+    if (typeof v.formula === "string" && v.formula.trim()) return v.formula;
+    if (typeof v.sharedFormula === "string" && v.sharedFormula.trim()) {
+      return v.sharedFormula;
+    }
+  }
+  return null;
+}
+
+/** CHOOSE() library name ranges from an Appliance_Input INDEX formula. */
+function parseChooseLibraryDRanges(formula) {
+  if (!formula) return [];
+  return [...String(formula).matchAll(/Appliance_Library!\$?D\$?(\d+):\$?D\$?(\d+)/gi)].map(
+    (m) => [Number(m[1]), Number(m[2])],
+  );
+}
+
+function shiftLibraryRanges(ranges, delta) {
+  if (!delta) return ranges;
+  return ranges.map(([start, end]) => [start + delta, end + delta]);
+}
+
+function findChooseIndex(ranges, librarySheet, propertyType, template) {
+  const property = String(propertyType ?? "").trim();
+  const selected = String(template ?? "").trim();
+  const exact = [];
+  const fuzzy = [];
+
+  for (let i = 0; i < ranges.length; i++) {
+    const [start, end] = ranges[i];
+    for (let r = start; r <= end; r++) {
+      const cat = String(cellValue(librarySheet.getCell(`A${r}`)) ?? "").trim();
+      const tmpl = String(cellValue(librarySheet.getCell(`B${r}`)) ?? "").trim();
+      if (!tmpl) continue;
+      if (cat && cat !== property) continue;
+      if (tmpl.toLowerCase() === selected.toLowerCase()) {
+        exact.push(i);
+        break;
+      }
+      if (libraryTemplateMatches(tmpl, selected)) {
+        fuzzy.push(i);
+        break;
+      }
+    }
+  }
+
+  if (exact.length) return exact[0];
+  if (fuzzy.length) return fuzzy[0];
+  return -1;
+}
+
+function applianceFromLibraryRow(librarySheet, libRow, excelRow) {
+  const name = String(cellValue(librarySheet.getCell(`D${libRow}`)) ?? "").trim();
+  if (!isUsableApplianceName(name)) return null;
+
+  const qty = Number(cellValue(librarySheet.getCell(`E${libRow}`))) || 0;
+  const watts = Number(cellValue(librarySheet.getCell(`F${libRow}`))) || 0;
+  const hours = Number(cellValue(librarySheet.getCell(`G${libRow}`))) || 0;
+  const dutyCycle = Number(cellValue(librarySheet.getCell(`H${libRow}`)));
+  const duty = Number.isFinite(dutyCycle) ? dutyCycle : 1;
+
+  return {
+    name,
+    qty,
+    watts,
+    hours,
+    dutyCycle: duty,
+    dailyKwh: (qty * watts * hours * duty) / 1000,
+    excelRow,
+    source: "template",
+  };
+}
+
+/**
+ * Simulate Appliance_Input A4:A20 INDEX/CHOOSE formulas, including relative
+ * library ranges that shift when filled down (Excel's displayed values).
+ */
+function readTemplateAppliancesFromInputFormulas(
+  workbook,
+  propertyType,
+  template,
+) {
+  const inputSheet = workbook.getWorksheet(SHEETS.applianceInput);
+  const librarySheet = workbook.getWorksheet(SHEETS.applianceLibrary);
+  if (!inputSheet || !librarySheet) return [];
+
+  const start = APPLIANCE_TABLE.startRow;
+  const end = APPLIANCE_TABLE.templateEndRow ?? 20;
+  const nameCol = APPLIANCE_TABLE.columns.name;
+
+  const a4Formula = cellFormula(inputSheet.getCell(`${nameCol}${start}`));
+  const a4Ranges = parseChooseLibraryDRanges(a4Formula);
+  if (!a4Ranges.length) return [];
+
+  const chooseIndex = findChooseIndex(
+    a4Ranges,
+    librarySheet,
+    propertyType,
+    template,
+  );
+  if (chooseIndex < 0) return [];
+
+  const rows = [];
+  for (let r = start; r <= end; r++) {
+    const formula = cellFormula(inputSheet.getCell(`${nameCol}${r}`));
+    let ranges = parseChooseLibraryDRanges(formula);
+    if (!ranges.length) {
+      ranges = shiftLibraryRanges(a4Ranges, r - start);
+    }
+
+    const range = ranges[chooseIndex];
+    if (!range) continue;
+
+    const [rangeStart, rangeEnd] = range;
+    const indexArg = r - start + 1;
+    const rangeLen = rangeEnd - rangeStart + 1;
+    if (indexArg < 1 || indexArg > rangeLen) continue;
+
+    const libRow = rangeStart + indexArg - 1;
+    const row = applianceFromLibraryRow(librarySheet, libRow, r);
+    if (row) rows.push(row);
+  }
+
+  return rows;
+}
+
 /**
  * Read template appliances from Appliance_Library (static values).
- * Avoids INDEX/CHOOSE formulas that LibreOffice often fails to cache for ExcelJS.
+ * Fallback when Appliance_Input INDEX/CHOOSE formulas cannot be parsed.
  */
-async function readTemplateAppliancesFromLibrary(propertyType, template) {
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(getTemplatePath());
+function readTemplateAppliancesFromLibrary(workbook, propertyType, template) {
   const sheet = workbook.getWorksheet(SHEETS.applianceLibrary);
   if (!sheet) {
     throw new Error("Appliance_Library sheet not found in Excel template");
@@ -1285,14 +1443,25 @@ async function readTemplateAppliancesFromLibrary(propertyType, template) {
 }
 
 /**
- * Prefill flow: read Appliance_Library rows for the selected property/template.
- * Does not depend on Excel/LibreOffice recalculating INDEX/CHOOSE into Appliance_Input.
+ * Prefill flow: evaluate Appliance_Input INDEX/CHOOSE the way Excel displays
+ * it (including relative range fill-down). Falls back to Appliance_Library.
  */
 export async function getTemplatePrefill(propertyType, template) {
-  const applianceRows = await readTemplateAppliancesFromLibrary(
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(getTemplatePath());
+
+  let applianceRows = readTemplateAppliancesFromInputFormulas(
+    workbook,
     propertyType,
     template,
   );
+  if (!applianceRows.length) {
+    applianceRows = readTemplateAppliancesFromLibrary(
+      workbook,
+      propertyType,
+      template,
+    );
+  }
 
   const dailyKwhRaw = applianceRows.reduce(
     (sum, row) => sum + (Number(row.dailyKwh) || 0),
@@ -1360,6 +1529,9 @@ function snapshotKeyCells(workbook, label, formData = null) {
       : null,
     outputs_B36_estimatedMonthlySpend: outputs
       ? cellValue(outputs.getCell(OUTPUT_LIVE_SUMMARY_CELLS.estimatedMonthlySpend))
+      : null,
+    outputs_B40_monthlyEnergy: outputs
+      ? cellValue(outputs.getCell(OUTPUT_LIVE_SUMMARY_CELLS.monthlyEnergy))
       : null,
     expectedMonthlyUsage: formData ? expectedMonthlyUsage(formData) : null,
   };
@@ -1565,12 +1737,13 @@ export async function getLiveSummary(formData) {
       method === "bill"
         ? (billSummary.estimatedMonthlySpend ?? null)
         : null,
+    estimatedMonthlyEnergyKwh: billSummary.estimatedMonthlyEnergyKwh ?? null,
     summary: results.summary,
     rowDailyKwh: Array.isArray(results.rowDailyKwh) ? results.rowDailyKwh : [],
     calculationSource: results.calculationSource || null,
   };
   excelDebugLog(
-    `[excel-debug] getLiveSummary ok annualLoad=${payload.estimatedAnnualLoadKwh} monthlySpend=${payload.estimatedMonthlySpend} source=${payload.calculationSource}`,
+    `[excel-debug] getLiveSummary ok annualLoad=${payload.estimatedAnnualLoadKwh} monthlySpend=${payload.estimatedMonthlySpend} monthlyEnergy=${payload.estimatedMonthlyEnergyKwh} source=${payload.calculationSource}`,
   );
   return payload;
 }

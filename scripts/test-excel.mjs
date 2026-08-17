@@ -1,7 +1,7 @@
 /**
  * Quick local smoke test for Excel integration.
  * Run: node scripts/test-excel.mjs
- * Prefill reads Appliance_Library (no recalc engine).
+ * Prefill simulates Appliance_Input INDEX/CHOOSE (no recalc engine).
  * Full calculation requires LibreOffice or Windows Microsoft Excel.
  */
 import "dotenv/config";

@@ -16,9 +16,30 @@ router.post("/extract", upload.single("bill"), async (req, res, next) => {
       return;
     }
 
+    let assessmentForm = req.body?.formData ?? null;
+    if (typeof assessmentForm === "string") {
+      try {
+        assessmentForm = JSON.parse(assessmentForm);
+      } catch {
+        assessmentForm = null;
+      }
+    }
+
+    const monthlyEnergyRaw = req.body?.monthlyEnergyKwh;
+    const monthlyEnergyKwh =
+      monthlyEnergyRaw === undefined ||
+      monthlyEnergyRaw === null ||
+      monthlyEnergyRaw === ""
+        ? null
+        : Number(monthlyEnergyRaw);
+
     const values = await analyzeBillDocument(req.file.buffer, {
       mimeType: req.file.mimetype || "application/octet-stream",
       fileName: req.file.originalname || "bill",
+      assessmentForm,
+      monthlyEnergyKwh: Number.isFinite(monthlyEnergyKwh)
+        ? monthlyEnergyKwh
+        : null,
     });
 
     res.json({

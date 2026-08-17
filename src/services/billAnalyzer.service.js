@@ -2,6 +2,7 @@ import {
   BILL_ANALYZER_SETTING_KEY,
   BILL_ANALYZER_USER_PROMPT,
   DEFAULT_BILL_ANALYZER_SYSTEM_PROMPT,
+  withBillAnalyzerContextPreamble,
 } from "../config/billAnalyzerDefaults.js";
 import { getSetting } from "../repositories/appSettings.repository.js";
 import { completeVisionJson } from "./openai.service.js";
@@ -10,18 +11,52 @@ import {
   validateAndMapBillExtraction,
 } from "./billValidation.service.js";
 
+function parseAssessmentForm(raw) {
+  if (!raw) return null;
+  if (typeof raw === "object") return raw;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function toNumberOrNull(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function buildUserPrompt(assessmentForm, monthlyEnergyKwh) {
+  const context = {
+    form: assessmentForm,
+    excel: {
+      monthlyEnergyKwh: monthlyEnergyKwh ?? null,
+      cell: "Outputs!B40",
+    },
+  };
+
+  return `${BILL_ANALYZER_USER_PROMPT}
+
+ASSESSMENT_CONTEXT (JSON)
+${JSON.stringify(context, null, 2)}
+
+Use these values when the system prompt refers to them. Prefer printed bill figures for extraction; use context for sanity checks or rules the system prompt defines.`;
+}
+
 async function loadSystemPrompt() {
   try {
     const row = await getSetting(BILL_ANALYZER_SETTING_KEY);
     const value = row?.value?.trim();
-    if (value) return value;
+    if (value) return withBillAnalyzerContextPreamble(value);
   } catch (error) {
     console.warn(
       "billAnalyzer: could not load prompt from app_settings, using default:",
       error.message,
     );
   }
-  return DEFAULT_BILL_ANALYZER_SYSTEM_PROMPT;
+  return withBillAnalyzerContextPreamble(DEFAULT_BILL_ANALYZER_SYSTEM_PROMPT);
 }
 
 function parseJsonContent(content) {
@@ -41,12 +76,15 @@ function parseJsonContent(content) {
 export async function analyzeBillDocument(fileBuffer, options = {}) {
   const mimeType = options.mimeType || "image/jpeg";
   const fileName = options.fileName || "bill";
+  const assessmentForm = parseAssessmentForm(options.assessmentForm);
+  const monthlyEnergyKwh = toNumberOrNull(options.monthlyEnergyKwh);
 
   if (!Buffer.isBuffer(fileBuffer) || fileBuffer.length === 0) {
     throw new Error("Empty bill upload");
   }
 
   const systemPrompt = await loadSystemPrompt();
+  const userPrompt = buildUserPrompt(assessmentForm, monthlyEnergyKwh);
   const mediaBase64 = fileBuffer.toString("base64");
 
   console.log(
@@ -55,7 +93,7 @@ export async function analyzeBillDocument(fileBuffer, options = {}) {
 
   const content = await completeVisionJson({
     systemPrompt,
-    userPrompt: BILL_ANALYZER_USER_PROMPT,
+    userPrompt,
     mediaBase64,
     mimeType,
     fileName,

@@ -12,20 +12,35 @@ import {
 let cache = null;
 let cacheMtimeMs = 0;
 
+/** Excel formatted text when a formula result is omitted (common for 0 / 0%). */
+function formattedCellFallback(cell) {
+  const text = typeof cell?.text === "string" ? cell.text.trim() : "";
+  if (!text || text.startsWith("#")) return null;
+  return coerceCellPrimitive(text);
+}
+
 /** Normalize an ExcelJS cell value to a plain string/number. */
 export function cellValue(cell) {
   const v = cell?.value;
-  if (v === null || v === undefined) return null;
+  if (v === 0) return 0;
+  if (v === null || v === undefined) return formattedCellFallback(cell);
   if (typeof v === "object") {
-    if (v.result !== undefined) {
-      if (v.result?.error) return null;
-      return coerceCellPrimitive(v.result);
+    if (v.result !== undefined && v.result !== null) {
+      if (typeof v.result === "object" && v.result.error) {
+        return formattedCellFallback(cell);
+      }
+      const coerced = coerceCellPrimitive(v.result);
+      if (coerced !== null && coerced !== undefined && coerced !== "") {
+        return coerced;
+      }
+      // ExcelJS/OOXML often omit a cached result of 0; keep numeric 0.
+      if (coerced === 0 || v.result === 0) return 0;
     }
     if (v.richText) return v.richText.map((r) => r.text).join("");
     if (v.text) return coerceCellPrimitive(v.text);
-    if (v.error) return null;
+    if (v.error) return formattedCellFallback(cell);
     if (v instanceof Date) return v.toISOString();
-    return null;
+    return formattedCellFallback(cell);
   }
   return coerceCellPrimitive(v);
 }
