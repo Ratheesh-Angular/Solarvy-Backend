@@ -574,38 +574,47 @@ function isUsableApplianceName(name) {
   return true;
 }
 
+function readApplianceInputRowAt(sheet, excelRow) {
+  const cols = APPLIANCE_TABLE.columns;
+  const name = cellValue(sheet.getCell(`${cols.name}${excelRow}`));
+  if (!isUsableApplianceName(name)) return null;
+
+  const dutyRaw = cellValue(sheet.getCell(`${cols.dutyCycle}${excelRow}`));
+  const dailyRaw = cols.dailyKwh
+    ? cellValue(sheet.getCell(`${cols.dailyKwh}${excelRow}`))
+    : null;
+  const templateEnd = APPLIANCE_TABLE.templateEndRow ?? 20;
+
+  return {
+    name: String(name).trim(),
+    qty: Number(cellValue(sheet.getCell(`${cols.qty}${excelRow}`))) || 0,
+    watts: Number(cellValue(sheet.getCell(`${cols.watts}${excelRow}`))) || 0,
+    hours: Number(cellValue(sheet.getCell(`${cols.hours}${excelRow}`))) || 0,
+    dutyCycle: Number(dutyRaw) || 0,
+    dailyKwh:
+      dailyRaw === null || dailyRaw === undefined ? null : Number(dailyRaw) || 0,
+    excelRow,
+    source: excelRow <= templateEnd ? "template" : "user",
+  };
+}
+
 /**
  * Read Appliance_Input rows. By default scans the full table; pass
  * templateOnly to read formula-driven A4:templateEndRow only.
+ * Blank names and Excel errors (#REF!, etc.) are skipped.
  */
 function readApplianceInputRows(workbook, { templateOnly = false } = {}) {
   const table = APPLIANCE_TABLE;
   const sheet = workbook.getWorksheet(table.sheet);
-  const cols = table.columns;
+  if (!sheet) return [];
   const end = templateOnly
     ? (table.templateEndRow ?? 20)
     : table.endRow;
   const rows = [];
 
   for (let r = table.startRow; r <= end; r++) {
-    const name = cellValue(sheet.getCell(`${cols.name}${r}`));
-    if (!isUsableApplianceName(name)) continue;
-
-    const dutyRaw = cellValue(sheet.getCell(`${cols.dutyCycle}${r}`));
-    const dailyRaw = cols.dailyKwh
-      ? cellValue(sheet.getCell(`${cols.dailyKwh}${r}`))
-      : null;
-
-    rows.push({
-      name: String(name).trim(),
-      qty: Number(cellValue(sheet.getCell(`${cols.qty}${r}`))) || 0,
-      watts: Number(cellValue(sheet.getCell(`${cols.watts}${r}`))) || 0,
-      hours: Number(cellValue(sheet.getCell(`${cols.hours}${r}`))) || 0,
-      dutyCycle: Number(dutyRaw) || 0,
-      dailyKwh: dailyRaw === null || dailyRaw === undefined ? null : Number(dailyRaw) || 0,
-      excelRow: r,
-      source: r <= (table.templateEndRow ?? 20) ? "template" : "user",
-    });
+    const row = readApplianceInputRowAt(sheet, r);
+    if (row) rows.push(row);
   }
 
   return rows;
@@ -1295,6 +1304,17 @@ function findChooseIndex(ranges, librarySheet, propertyType, template) {
   return -1;
 }
 
+function libraryRowMatchesTemplate(librarySheet, libRow, propertyType, template) {
+  const property = String(propertyType ?? "").trim();
+  const selected = String(template ?? "").trim();
+  const cat = String(cellValue(librarySheet.getCell(`A${libRow}`)) ?? "").trim();
+  const tmpl = String(cellValue(librarySheet.getCell(`B${libRow}`)) ?? "").trim();
+  if (!tmpl) return false;
+  if (cat && property && cat !== property) return false;
+  if (tmpl.toLowerCase() === selected.toLowerCase()) return true;
+  return libraryTemplateMatches(tmpl, selected);
+}
+
 function applianceFromLibraryRow(librarySheet, libRow, excelRow) {
   const name = String(cellValue(librarySheet.getCell(`D${libRow}`)) ?? "").trim();
   if (!isUsableApplianceName(name)) return null;
@@ -1318,8 +1338,61 @@ function applianceFromLibraryRow(librarySheet, libRow, excelRow) {
 }
 
 /**
- * Simulate Appliance_Input A4:A20 INDEX/CHOOSE formulas, including relative
- * library ranges that shift when filled down (Excel's displayed values).
+ * Appliance_Library!Q4:T43 index used by Appliance_Input IFERROR/INDEX/VLOOKUP:
+ * Q=id, R=start row, S=category, T=template name.
+ */
+function readLibraryLookupStartRow(librarySheet, propertyType, template) {
+  const property = String(propertyType ?? "").trim();
+  const selected = String(template ?? "").trim();
+  if (!selected) return -1;
+
+  const exact = [];
+  const fuzzy = [];
+  for (let r = 4; r <= 80; r++) {
+    const cat = String(cellValue(librarySheet.getCell(`S${r}`)) ?? "").trim();
+    const tmpl = String(cellValue(librarySheet.getCell(`T${r}`)) ?? "").trim();
+    const startRow = Number(cellValue(librarySheet.getCell(`R${r}`)));
+    if (!tmpl || !Number.isFinite(startRow) || startRow < 1) continue;
+    if (cat && property && cat !== property) continue;
+    if (tmpl.toLowerCase() === selected.toLowerCase()) {
+      exact.push(startRow);
+      break;
+    }
+    if (libraryTemplateMatches(tmpl, selected)) fuzzy.push(startRow);
+  }
+  if (exact.length) return exact[0];
+  if (fuzzy.length) return fuzzy[0];
+  return -1;
+}
+
+function readAppliancesFromLibraryStart(
+  librarySheet,
+  libStartRow,
+  propertyType,
+  template,
+) {
+  const start = APPLIANCE_TABLE.startRow;
+  const end = APPLIANCE_TABLE.templateEndRow ?? 20;
+  const rows = [];
+
+  for (let r = start; r <= end; r++) {
+    const libRow = libStartRow + (r - start);
+    if (!libraryRowMatchesTemplate(librarySheet, libRow, propertyType, template)) {
+      break;
+    }
+    const row = applianceFromLibraryRow(librarySheet, libRow, r);
+    if (!row) break;
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+/**
+ * Simulate Appliance_Input A4:A20 name formulas.
+ * Current workbook: INDEX(D$1:D$312, VLOOKUP(...start row...)+fill).
+ * Legacy workbook: INDEX/CHOOSE over per-template D ranges.
+ * Unused slots are IFERROR blanks (not #REF!); stop at empty / next template.
  */
 function readTemplateAppliancesFromInputFormulas(
   workbook,
@@ -1330,12 +1403,28 @@ function readTemplateAppliancesFromInputFormulas(
   const librarySheet = workbook.getWorksheet(SHEETS.applianceLibrary);
   if (!inputSheet || !librarySheet) return [];
 
+  const lookupStart = readLibraryLookupStartRow(
+    librarySheet,
+    propertyType,
+    template,
+  );
+  if (lookupStart > 0) {
+    return readAppliancesFromLibraryStart(
+      librarySheet,
+      lookupStart,
+      propertyType,
+      template,
+    );
+  }
+
   const start = APPLIANCE_TABLE.startRow;
   const end = APPLIANCE_TABLE.templateEndRow ?? 20;
   const nameCol = APPLIANCE_TABLE.columns.name;
 
   const a4Formula = cellFormula(inputSheet.getCell(`${nameCol}${start}`));
-  const a4Ranges = parseChooseLibraryDRanges(a4Formula);
+  const a4Ranges = parseChooseLibraryDRanges(a4Formula).filter(
+    ([rangeStart, rangeEnd]) => rangeEnd - rangeStart < 80,
+  );
   if (!a4Ranges.length) return [];
 
   const chooseIndex = findChooseIndex(
@@ -1348,8 +1437,19 @@ function readTemplateAppliancesFromInputFormulas(
 
   const rows = [];
   for (let r = start; r <= end; r++) {
-    const formula = cellFormula(inputSheet.getCell(`${nameCol}${r}`));
-    let ranges = parseChooseLibraryDRanges(formula);
+    const nameCell = inputSheet.getCell(`${nameCol}${r}`);
+    const formula = cellFormula(nameCell);
+
+    // Unused slots may be blank (no formula). Static pasted names still count.
+    if (!formula) {
+      const fromInput = readApplianceInputRowAt(inputSheet, r);
+      if (fromInput) rows.push(fromInput);
+      continue;
+    }
+
+    let ranges = parseChooseLibraryDRanges(formula).filter(
+      ([rangeStart, rangeEnd]) => rangeEnd - rangeStart < 80,
+    );
     if (!ranges.length) {
       ranges = shiftLibraryRanges(a4Ranges, r - start);
     }
@@ -1363,8 +1463,13 @@ function readTemplateAppliancesFromInputFormulas(
     if (indexArg < 1 || indexArg > rangeLen) continue;
 
     const libRow = rangeStart + indexArg - 1;
+    if (!libraryRowMatchesTemplate(librarySheet, libRow, propertyType, template)) {
+      break;
+    }
+
     const row = applianceFromLibraryRow(librarySheet, libRow, r);
-    if (row) rows.push(row);
+    if (!row) break;
+    rows.push(row);
   }
 
   return rows;
@@ -1443,8 +1548,10 @@ function readTemplateAppliancesFromLibrary(workbook, propertyType, template) {
 }
 
 /**
- * Prefill flow: evaluate Appliance_Input INDEX/CHOOSE the way Excel displays
- * it (including relative range fill-down). Falls back to Appliance_Library.
+ * Prefill flow: resolve the selected template via Appliance_Input formulas
+ * (VLOOKUP start row / legacy CHOOSE). Skip blank and #REF! names.
+ * Cached Appliance_Input values are last resort (they reflect the last-saved
+ * template, not the one just selected).
  */
 export async function getTemplatePrefill(propertyType, template) {
   const workbook = new ExcelJS.Workbook();
@@ -1461,6 +1568,9 @@ export async function getTemplatePrefill(propertyType, template) {
       propertyType,
       template,
     );
+  }
+  if (!applianceRows.length) {
+    applianceRows = readApplianceInputRows(workbook, { templateOnly: true });
   }
 
   const dailyKwhRaw = applianceRows.reduce(
