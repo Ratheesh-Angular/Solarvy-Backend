@@ -3,6 +3,11 @@
  * Run: node scripts/test-excel.mjs
  * Prefill simulates Appliance_Input INDEX/CHOOSE (no recalc engine).
  * Full calculation requires LibreOffice or Windows Microsoft Excel.
+ *
+ * Results must come from the workbook Outputs sheet (calculationSource
+ * excel-com or libreoffice). Node-side formula copies are not allowed.
+ * Assessments stored before this contract keep their old JSON until the
+ * user runs the assessment again.
  */
 import "dotenv/config";
 import { getCatalogs } from "../src/services/excelReader.service.js";
@@ -81,6 +86,21 @@ async function main() {
 
   console.log("\n3. Full calculation (bill method)...");
   const results = await calculateAssessment(sampleForm);
+
+  console.log("   calculationSource:", results.calculationSource);
+  if (
+    results.calculationSource !== "excel-com" &&
+    results.calculationSource !== "libreoffice"
+  ) {
+    throw new Error(
+      `calculationSource must be excel-com or libreoffice (Outputs sheet), got ${results.calculationSource}`,
+    );
+  }
+  if (results.calculationError) {
+    throw new Error(
+      `calculationError set after recalc: ${results.calculationError}`,
+    );
+  }
 
   console.log("   propertyType:", results.propertyType);
   assertNumber("recommendedSolarKwp", results.recommendedSolarKwp);

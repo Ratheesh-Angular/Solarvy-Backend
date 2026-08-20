@@ -3,7 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import ExcelJS from "exceljs";
 import {
   getTemplatePath,
@@ -243,92 +243,179 @@ function logLibreOfficeExec(label, soffice, args, result, error = null) {
   }
 }
 
+const LIBREOFFICE_FORCE_XLSX =
+  'xlsx:Calc MS Excel 2007 XML:{"RecalcOptions":{"type":"string","value":"force"}}';
+
+function findConvertedFile(outDir, sourcePath, ext) {
+  const expected = path.join(outDir, `${path.parse(sourcePath).name}.${ext}`);
+  if (fs.existsSync(expected)) return expected;
+  if (!fs.existsSync(outDir)) return null;
+  const match = fs
+    .readdirSync(outDir)
+    .find((name) => name.toLowerCase().endsWith(`.${ext}`));
+  return match ? path.join(outDir, match) : null;
+}
+
+async function execSoffice(soffice, extraArgs, profileDir) {
+  const args = [
+    `-env:UserInstallation=${pathToFileURL(profileDir).href}`,
+    "--headless",
+    "--norestore",
+    "--nologo",
+    "--nolockcheck",
+    ...extraArgs,
+  ];
+  const env = { ...process.env };
+  if (process.platform !== "win32") {
+    env.SAL_USE_VCLPLUGIN = env.SAL_USE_VCLPLUGIN || "svp";
+  }
+  const result = await execFileAsync(soffice, args, {
+    timeout: getCalcTimeoutMs(),
+    windowsHide: true,
+    env,
+  });
+  return { args, result };
+}
+
+async function convertWithLibreOffice(
+  soffice,
+  profileDir,
+  inputPath,
+  convertTo,
+  outDir,
+) {
+  fs.mkdirSync(outDir, { recursive: true });
+  const extraArgs = ["--convert-to", convertTo, "--outdir", outDir, inputPath];
+  const ext = String(convertTo).split(":")[0].toLowerCase();
+  try {
+    const { args, result } = await execSoffice(soffice, extraArgs, profileDir);
+    logLibreOfficeExec(`convert ${ext} ok`, soffice, args, result);
+  } catch (error) {
+    logLibreOfficeExec(
+      `convert ${ext} failed`,
+      soffice,
+      extraArgs,
+      { stdout: error.stdout, stderr: error.stderr },
+      error,
+    );
+    throw error;
+  }
+  const outPath = findConvertedFile(outDir, inputPath, ext);
+  if (!outPath) {
+    throw new Error(
+      `LibreOffice did not produce a .${ext} file from ${path.basename(inputPath)}`,
+    );
+  }
+  return outPath;
+}
+
 /**
  * Recalculate a workbook with LibreOffice headless (production / Linux EC2).
+ * Isolated UserInstallation avoids profile-lock hangs under concurrent assessments.
+ * ODS round-trip forces a full Calc rebuild when cached xlsx results stay stale.
  */
-async function recalculateWithLibreOffice(inputPath) {
-  const outDir = path.join(
+async function recalculateWithLibreOffice(
+  inputPath,
+  { odsRoundtrip = false } = {},
+) {
+  const soffice = resolveLibreOfficePath();
+  const sessionDir = path.join(
     ensureTempDir(),
-    `out-${crypto.randomUUID().slice(0, 8)}`,
+    `lo-${crypto.randomUUID().slice(0, 8)}`,
   );
+  fs.mkdirSync(sessionDir, { recursive: true });
+  const profileDir = path.join(sessionDir, "profile");
+  fs.mkdirSync(profileDir, { recursive: true });
+  const outDir = path.join(sessionDir, "out");
   fs.mkdirSync(outDir, { recursive: true });
 
-  const soffice = resolveLibreOfficePath();
-  const forceArgs = [
-    "--headless",
-    "--norestore",
-    "--convert-to",
-    'xlsx:Calc MS Excel 2007 XML:{"RecalcOptions":{"type":"string","value":"force"}}',
-    "--outdir",
-    outDir,
-    inputPath,
-  ];
-  const plainArgs = [
-    "--headless",
-    "--norestore",
-    "--convert-to",
-    "xlsx",
-    "--outdir",
-    outDir,
-    inputPath,
-  ];
-
   excelDebugLog(
-    `[excel-debug] LibreOffice recalc start input=${inputPath} outDir=${outDir} timeoutMs=${getCalcTimeoutMs()}`,
+    `[excel-debug] LibreOffice recalc start input=${inputPath} session=${sessionDir} odsRoundtrip=${odsRoundtrip} timeoutMs=${getCalcTimeoutMs()}`,
   );
 
   try {
-    const forceResult = await execFileAsync(soffice, forceArgs, {
-      timeout: getCalcTimeoutMs(),
-      windowsHide: true,
-    });
-    logLibreOfficeExec("force-recalc ok", soffice, forceArgs, forceResult);
-  } catch (forceError) {
-    logLibreOfficeExec(
-      "force-recalc failed; falling back to plain xlsx",
-      soffice,
-      forceArgs,
-      {
-        stdout: forceError.stdout,
-        stderr: forceError.stderr,
-      },
-      forceError,
-    );
-    try {
-      const plainResult = await execFileAsync(soffice, plainArgs, {
-        timeout: getCalcTimeoutMs(),
-        windowsHide: true,
-      });
-      logLibreOfficeExec("plain-convert ok", soffice, plainArgs, plainResult);
-    } catch (plainError) {
-      logLibreOfficeExec(
-        "plain-convert failed",
+    let sourcePath = inputPath;
+    if (odsRoundtrip) {
+      const odsDir = path.join(sessionDir, "ods");
+      sourcePath = await convertWithLibreOffice(
         soffice,
-        plainArgs,
-        {
-          stdout: plainError.stdout,
-          stderr: plainError.stderr,
-        },
-        plainError,
+        profileDir,
+        inputPath,
+        "ods",
+        odsDir,
       );
-      throw plainError;
     }
-  }
 
-  const outPath = path.join(outDir, path.basename(inputPath));
-  const outExists = fs.existsSync(outPath);
-  const outSize = outExists ? fs.statSync(outPath).size : 0;
-  excelDebugLog(
-    `[excel-debug] LibreOffice outPath=${outPath} exists=${outExists} size=${outSize}`,
-  );
-  if (!outExists) {
-    throw new Error("LibreOffice did not produce a recalculated workbook");
+    let outPath;
+    try {
+      outPath = await convertWithLibreOffice(
+        soffice,
+        profileDir,
+        sourcePath,
+        LIBREOFFICE_FORCE_XLSX,
+        outDir,
+      );
+    } catch (forceError) {
+      if (!odsRoundtrip) {
+        const odsDir = path.join(sessionDir, "ods-fallback");
+        const odsPath = await convertWithLibreOffice(
+          soffice,
+          profileDir,
+          inputPath,
+          "ods",
+          odsDir,
+        );
+        try {
+          outPath = await convertWithLibreOffice(
+            soffice,
+            profileDir,
+            odsPath,
+            LIBREOFFICE_FORCE_XLSX,
+            outDir,
+          );
+        } catch {
+          outPath = await convertWithLibreOffice(
+            soffice,
+            profileDir,
+            odsPath,
+            "xlsx",
+            outDir,
+          );
+        }
+      } else {
+        outPath = await convertWithLibreOffice(
+          soffice,
+          profileDir,
+          sourcePath,
+          "xlsx",
+          outDir,
+        );
+      }
+      excelDebugLog(
+        `[excel-debug] LibreOffice force-recalc failed (${forceError.message || forceError}); used fallback out=${outPath}`,
+      );
+    }
+
+    const outSize = fs.existsSync(outPath) ? fs.statSync(outPath).size : 0;
+    excelDebugLog(
+      `[excel-debug] LibreOffice outPath=${outPath} exists=${fs.existsSync(outPath)} size=${outSize}`,
+    );
+    if (!fs.existsSync(outPath)) {
+      throw new Error("LibreOffice did not produce a recalculated workbook");
+    }
+    return { outPath, cleanupDir: sessionDir };
+  } catch (error) {
+    safeUnlink(sessionDir);
+    throw error;
   }
-  return { outPath, cleanupDir: outDir };
 }
 
 /** Prefer Excel COM on Windows (matches desktop Excel); LibreOffice is fallback. */
-async function recalculateWorkbook(inputPath, formData = null) {
+async function recalculateWorkbook(
+  inputPath,
+  formData = null,
+  { odsRoundtrip = false } = {},
+) {
   if (excelComAvailable()) {
     console.log("Using Microsoft Excel COM for local recalculation");
     let inputsJsonPath = null;
@@ -351,9 +438,9 @@ async function recalculateWorkbook(inputPath, formData = null) {
   }
   if (libreOfficeAvailable()) {
     console.log(
-      `Using LibreOffice for recalculation (path=${resolveLibreOfficePath()})`,
+      `Using LibreOffice for recalculation (path=${resolveLibreOfficePath()} odsRoundtrip=${odsRoundtrip})`,
     );
-    return recalculateWithLibreOffice(inputPath);
+    return recalculateWithLibreOffice(inputPath, { odsRoundtrip });
   }
   throw new Error(
     "No Excel recalculation engine found. Install LibreOffice (npm run setup:local) or use Windows with Microsoft Excel.",
@@ -373,8 +460,58 @@ function safeUnlink(p) {
 }
 
 function setCell(sheet, ref, value) {
-  if (value === undefined || value === null || value === "") return;
+  if (value === undefined || value === null) return;
+  if (typeof value === "string" && value.trim() === "") return;
   sheet.getCell(ref).value = value;
+}
+
+function clearCellValidation(sheet, ref) {
+  try {
+    sheet.getCell(ref).dataValidation = undefined;
+  } catch {
+    // ignore
+  }
+  try {
+    const model = sheet.dataValidations?.model;
+    if (model) {
+      delete model[ref];
+      delete model[String(ref).toUpperCase()];
+    }
+  } catch {
+    // ignore
+  }
+}
+
+/** Match COM: drop dropdown validation on B25 so backup hours actually stick. */
+function writeBackupDuration(sheet, hours) {
+  const n = toNumber(hours);
+  if (n === null) return;
+  clearCellValidation(sheet, USER_INPUT_CELLS.backupDuration);
+  sheet.getCell(USER_INPUT_CELLS.backupDuration).value = n;
+}
+
+/**
+ * Drop cached formula results so LibreOffice cannot reuse stale template values.
+ * fullCalcOnLoad asks Calc/Excel to recompute on open.
+ */
+function stripCachedFormulaResults(workbook) {
+  workbook.calcProperties = workbook.calcProperties || {};
+  workbook.calcProperties.fullCalcOnLoad = true;
+
+  workbook.eachSheet((sheet) => {
+    sheet.eachRow({ includeEmpty: false }, (row) => {
+      row.eachCell({ includeEmpty: false }, (cell) => {
+        const v = cell.value;
+        if (!v || typeof v !== "object") return;
+        const formula = v.formula ?? v.sharedFormula ?? cell.formula;
+        if (!formula) return;
+        if (!Object.prototype.hasOwnProperty.call(v, "result")) return;
+        const next = { ...v };
+        delete next.result;
+        cell.value = next;
+      });
+    });
+  });
 }
 
 function toNumber(value) {
@@ -421,11 +558,7 @@ function writeInputs(workbook, formData) {
   setCell(userInputs, USER_INPUT_CELLS.inputMethod, methodLabel);
 
   setCell(userInputs, USER_INPUT_CELLS.roofArea, toNumber(formData.roofArea));
-  setCell(
-    userInputs,
-    USER_INPUT_CELLS.backupDuration,
-    toNumber(formData.backupDuration),
-  );
+  writeBackupDuration(userInputs, formData.backupDuration);
 
   if (formData.inputMethod === "bill" && formData.bill) {
     setCell(
@@ -730,463 +863,6 @@ function readDailyKwhByRow(workbook, inputMethod) {
     });
   }
   return rows;
-}
-
-function numOr(value, fallback = 0) {
-  if (value === null || value === undefined || value === "") return fallback;
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-function round1(value) {
-  return Math.round(value * 10) / 10;
-}
-
-function capexByProperty(propertyType, home, office, factory, other) {
-  if (propertyType === "Home") return home;
-  if (propertyType === "Office") return office;
-  if (propertyType === "Factory") return factory;
-  return other;
-}
-
-/**
- * Derive Outputs financial/sizing/% fields in Node.
- * Used only when Excel COM leaves Outputs caches empty/stale after recalc.
- * Mirrors the *live* workbook formulas (Solar_Sizing / Battery_Sizing /
- * Load_Estimation / Financial_Model / Diesel_Economics), not the older
- * peak-sun daily floor model.
- */
-function deriveAssessmentOutputs(workbook, formData) {
-  const userInputs = workbook.getWorksheet(SHEETS.userInputs);
-  const billInput = workbook.getWorksheet(SHEETS.billInput);
-  const applianceSheet = workbook.getWorksheet(SUMMARY_CELLS.appliance.sheet);
-  const customSheet = workbook.getWorksheet(SUMMARY_CELLS.custom.sheet);
-
-  const propertyType =
-    cellValue(userInputs.getCell(USER_INPUT_CELLS.propertyType)) ||
-    formData.propertyType ||
-    "Home";
-  const powerSetup =
-    cellValue(userInputs.getCell(USER_INPUT_CELLS.powerSetup)) ||
-    formData.powerSetup ||
-    null;
-  const objective =
-    cellValue(userInputs.getCell(USER_INPUT_CELLS.mainObjective)) ||
-    formData.mainObjective ||
-    null;
-  const country =
-    cellValue(userInputs.getCell(USER_INPUT_CELLS.country)) ||
-    formData.country ||
-    null;
-  const city =
-    cellValue(userInputs.getCell(USER_INPUT_CELLS.state)) ||
-    formData.city ||
-    formData.state ||
-    null;
-  const scenarioName = cellValue(userInputs.getCell("B5")) || "Base Case";
-  const assessmentId = cellValue(userInputs.getCell("B4"));
-
-  const inputMethodLabel =
-    cellValue(userInputs.getCell(USER_INPUT_CELLS.inputMethod)) ||
-    INPUT_METHOD_LABELS[formData.inputMethod] ||
-    "Bill";
-
-  const writtenUsage = numOr(
-    cellValue(userInputs.getCell(USER_INPUT_CELLS.monthlyUsageKwh)) ??
-      formData.bill?.monthlyUsage,
-    0,
-  );
-  const billMonthly =
-    writtenUsage > 0
-      ? writtenUsage
-      : numOr(cellValue(billInput.getCell("B11")), 0);
-
-  const billingDays = Math.max(numOr(cellValue(billInput.getCell("B8")), 30), 1);
-
-  const dailyKwhFromRows = (rows, { useLoadFactorPct = true } = {}) => {
-    if (!Array.isArray(rows) || !rows.length) return 0;
-    return rows.reduce((sum, row) => {
-      const qty = numOr(row.qty, 0);
-      const hours = numOr(row.hours, 0);
-      const power = numOr(row.power, 0);
-      const duty = useLoadFactorPct
-        ? numOr(row.loadFactorPct, 100) / 100
-        : numOr(row.dutyCycle, 1);
-      return sum + (qty * hours * power * duty) / 1000;
-    }, 0);
-  };
-
-  const peakKwFromRows = (rows) => {
-    if (!Array.isArray(rows) || !rows.length) return 0;
-    return rows.reduce(
-      (sum, row) => sum + (numOr(row.qty, 0) * numOr(row.power, 0)) / 1000,
-      0,
-    );
-  };
-
-  const applianceDailyFromForm = dailyKwhFromRows(formData.appliance?.rows);
-  const customDailyFromForm = dailyKwhFromRows(formData.custom?.rows);
-
-  const applianceMonthlyFromSheet = numOr(
-    cellValue(applianceSheet.getCell(SUMMARY_CELLS.appliance.monthlyKwh)),
-    0,
-  );
-  const customMonthlyFromSheet = numOr(
-    cellValue(customSheet.getCell(SUMMARY_CELLS.custom.monthlyKwh)),
-    0,
-  );
-
-  const applianceMonthly =
-    applianceDailyFromForm > 0
-      ? applianceDailyFromForm * billingDays
-      : applianceMonthlyFromSheet;
-  const customMonthly =
-    customDailyFromForm > 0
-      ? customDailyFromForm * billingDays
-      : customMonthlyFromSheet;
-
-  let selectedMonthly = billMonthly;
-  if (inputMethodLabel === "Appliances") selectedMonthly = applianceMonthly;
-  else if (inputMethodLabel === "Custom") selectedMonthly = customMonthly;
-  else if (inputMethodLabel !== "Bill") {
-    selectedMonthly = Math.max(billMonthly, applianceMonthly, customMonthly);
-  }
-
-  // Load_Estimation!B9 = monthly * 12
-  const annualLoad = selectedMonthly * 12;
-  const billAnnualLoad = billMonthly * 12;
-  const applianceAnnualLoad = applianceMonthly * 12;
-  const customAnnualLoad = customMonthly * 12;
-
-  const yieldKwhPerKwp = Math.max(numOr(cellValue(userInputs.getCell("B42")), 1450), 1);
-  const targetSolarShare = Math.min(
-    1,
-    numOr(cellValue(userInputs.getCell("B26")), 0.9),
-  );
-
-  // Solar_Sizing!B11 = annual_load / yield; B12 = B11 (live template; no ROUND)
-  const recommendedSolarKwpRaw =
-    annualLoad > 0 ? annualLoad / yieldKwhPerKwp : 0;
-  const recommendedSolarKwp = round1(recommendedSolarKwpRaw);
-
-  // Solar_Sizing!B13 / B14 — use unrounded kWp so % impact matches B26 exactly
-  const annualPvGenerationKwh = recommendedSolarKwpRaw * yieldKwhPerKwp;
-  const usableSolarKwh = annualPvGenerationKwh * targetSolarShare;
-
-  const declaredPeakKw = numOr(cellValue(userInputs.getCell("B19")), 0);
-  let estimatedPeakKw = 0;
-  if (inputMethodLabel === "Bill") {
-    estimatedPeakKw =
-      selectedMonthly > 0 ? (selectedMonthly / (30 * 24)) * 3 : 0;
-  } else if (inputMethodLabel === "Appliances") {
-    estimatedPeakKw =
-      peakKwFromRows(formData.appliance?.rows) ||
-      numOr(cellValue(applianceSheet.getCell("L6")), 0);
-  } else if (inputMethodLabel === "Custom") {
-    estimatedPeakKw =
-      peakKwFromRows(formData.custom?.rows) ||
-      numOr(cellValue(customSheet.getCell("M7")), 0);
-  }
-  // Load_Estimation!B11
-  const peakLoadKw = declaredPeakKw > 0 ? declaredPeakKw : estimatedPeakKw;
-
-  const criticalPct = numOr(cellValue(userInputs.getCell("B24")), 0.6);
-  const backupHours = numOr(
-    cellValue(userInputs.getCell(USER_INPUT_CELLS.backupDuration)) ??
-      formData.backupDuration,
-    4,
-  );
-  const inverterFactor = numOr(cellValue(userInputs.getCell("B44")), 1);
-  // Battery_Sizing: criticalPeak * backupHours (B5*B6), floored at 0.5
-  const criticalPeakKw = peakLoadKw * criticalPct;
-  const recommendedBatteryKwh = round1(
-    Math.max(0.5, criticalPeakKw * backupHours),
-  );
-  const recommendedInverterKw = round1(peakLoadKw * inverterFactor);
-
-  const outageHours = numOr(cellValue(userInputs.getCell("B20")), 6);
-  const outageFraction = Math.min(1, outageHours / 24);
-  const generatorKwhPerLitre = Math.max(
-    numOr(cellValue(userInputs.getCell("B32")), 3.5),
-    0.1,
-  );
-  const gridTariffBase = numOr(
-    cellValue(userInputs.getCell(USER_INPUT_CELLS.gridTariff)) ??
-      formData.bill?.gridTariff,
-    numOr(cellValue(userInputs.getCell("B30")), 0),
-  );
-  const dieselPrice = numOr(cellValue(userInputs.getCell("B31")), 1200);
-  const dieselCostPerKwh = dieselPrice / generatorKwhPerLitre;
-
-  // Diesel_Economics!B7 blended effective tariff
-  const effectiveTariff =
-    powerSetup === "Grid Only"
-      ? gridTariffBase ||
-        numOr(cellValue(billInput.getCell("B7")), 200)
-      : (gridTariffBase || numOr(cellValue(billInput.getCell("B7")), 200)) *
-          (1 - outageFraction) +
-        dieselCostPerKwh * outageFraction;
-
-  const usesDieselDisplacement =
-    powerSetup === "Grid + Generator" || powerSetup === "Generator Only";
-  const dieselSavedLitres = usesDieselDisplacement
-    ? (usableSolarKwh * outageFraction) / generatorKwhPerLitre
-    : 0;
-
-  const pvCapex = numOr(
-    cellValue(userInputs.getCell("B33")),
-    capexByProperty(propertyType, 300000, 420000, 320000, 550000),
-  );
-  const batteryCapex = numOr(
-    cellValue(userInputs.getCell("B34")),
-    capexByProperty(propertyType, 260000, 350000, 300000, 420000),
-  );
-  const inverterCapex = numOr(
-    cellValue(userInputs.getCell("B35")),
-    capexByProperty(propertyType, 230000, 300000, 220000, 380000),
-  );
-  const bosFactor = numOr(
-    cellValue(userInputs.getCell("B36")),
-    capexByProperty(propertyType, 0.12, 0.15, 0.12, 0.2),
-  );
-  const omRate = numOr(cellValue(userInputs.getCell("B37")), 0.02);
-
-  // Financial_Model live: B7=sum of PV+batt+inv, B8=BOS, B9=total
-  const pvCost = recommendedSolarKwp * pvCapex;
-  const batteryCost = recommendedBatteryKwh * batteryCapex;
-  const inverterCost = recommendedInverterKw * inverterCapex;
-  const equipmentSubtotal = pvCost + batteryCost + inverterCost;
-  const bosCost = equipmentSubtotal * bosFactor;
-  const estimatedSystemCost = equipmentSubtotal + bosCost;
-  // Financial_Model!B10 = Solar_Sizing!B14 * Diesel_Economics!B7
-  const grossAnnualSavings = usableSolarKwh * effectiveTariff;
-  const annualOmAllowance = estimatedSystemCost * omRate;
-  const netAnnualSavings = grossAnnualSavings - annualOmAllowance;
-  const simplePaybackYears =
-    netAnnualSavings > 0 ? estimatedSystemCost / netAnnualSavings : null;
-
-  // Outputs B27–B29 use annual usable / annual load
-  const solarShare = annualLoad > 0 ? usableSolarKwh / annualLoad : null;
-  const gridOffset =
-    annualLoad > 0
-      ? (usableSolarKwh * (1 - outageFraction)) / annualLoad
-      : null;
-  const dieselReduction =
-    annualLoad > 0 ? (usableSolarKwh * outageFraction) / annualLoad : null;
-
-  // Chart costs: Grid = B30, Diesel = Diesel_Economics!B6, Solar LCOE = B9/(B14*B39)
-  const systemLifeYears = Math.max(
-    numOr(cellValue(userInputs.getCell("B39")), 15),
-    1,
-  );
-  const gridCostPerKwh =
-    gridTariffBase > 0
-      ? gridTariffBase
-      : numOr(cellValue(billInput.getCell("B7")), 0) || null;
-  const solarCostPerKwh =
-    usableSolarKwh > 0 && estimatedSystemCost > 0
-      ? estimatedSystemCost / (usableSolarKwh * systemLifeYears)
-      : null;
-
-  let leadType = "Review";
-  if (simplePaybackYears !== null) {
-    if (simplePaybackYears <= 5) leadType = "Hot";
-    else if (simplePaybackYears <= 8) leadType = "Warm";
-    else leadType = "Nurture";
-  }
-  const recommendedNextStep =
-    leadType === "Hot"
-      ? "Book installer intro"
-      : leadType === "Warm"
-        ? "Request expert review"
-        : "Download report and revisit";
-
-  const primaryRecommendation =
-    objective === "Reduce Electricity Bills"
-      ? "Prioritise bill reduction with daytime solar offset"
-      : objective === "Reduce Diesel Use"
-        ? "Prioritise diesel displacement with hybrid solar + storage"
-        : objective === "Backup During Outages"
-          ? "Prioritise backup autonomy with battery-first sizing"
-          : "Review objective mapping";
-
-  const roofAreaValue = numOr(
-    cellValue(userInputs.getCell(USER_INPUT_CELLS.roofArea)),
-    0,
-  );
-  const confidenceNote =
-    roofAreaValue === 0 || selectedMonthly === 0
-      ? "Preliminary estimate based on partial inputs"
-      : "Preliminary estimate with user-supplied site context";
-
-  return {
-    assessmentId,
-    scenarioName,
-    country,
-    city,
-    propertyType,
-    powerSetup,
-    objective,
-    recommendedSolarKwp,
-    recommendedBatteryKwh,
-    recommendedInverterKw,
-    annualPvGenerationKwh: round1(annualPvGenerationKwh),
-    usableSolarKwh: round1(usableSolarKwh),
-    estimatedSystemCost: Math.round(estimatedSystemCost),
-    grossAnnualSavings: Math.round(grossAnnualSavings),
-    annualOmAllowance: Math.round(annualOmAllowance),
-    netAnnualSavings: Math.round(netAnnualSavings),
-    simplePaybackYears:
-      simplePaybackYears === null ? null : round1(simplePaybackYears),
-    dieselSavedLitres: round1(dieselSavedLitres),
-    leadType,
-    recommendedNextStep,
-    primaryRecommendation,
-    confidenceNote,
-    solarShare,
-    gridOffset,
-    dieselReduction,
-    gridCostPerKwh:
-      gridCostPerKwh === null || gridCostPerKwh === 0
-        ? null
-        : round1(gridCostPerKwh),
-    dieselCostPerKwh: round1(dieselCostPerKwh),
-    solarCostPerKwh:
-      solarCostPerKwh === null ? null : round1(solarCostPerKwh),
-    summary: {
-      bill: {
-        monthlyUsage: billMonthly || null,
-        estimatedAnnualLoadKwh: billAnnualLoad || null,
-        // Outputs!B36 — prefer user-entered spend, else usage × tariff.
-        estimatedMonthlySpend:
-          toNumber(formData.bill?.monthlySpend) ??
-          (billMonthly > 0 && effectiveTariff > 0
-            ? Math.round(billMonthly * effectiveTariff)
-            : null),
-      },
-      appliance: {
-        dailyKwh:
-          applianceDailyFromForm > 0
-            ? round1(applianceDailyFromForm)
-            : numOr(
-                cellValue(
-                  applianceSheet.getCell(SUMMARY_CELLS.appliance.dailyKwh),
-                ),
-                null,
-              ),
-        monthlyKwh: applianceMonthly || null,
-        estimatedAnnualLoadKwh: applianceAnnualLoad || null,
-      },
-      custom: {
-        dailyKwh:
-          customDailyFromForm > 0
-            ? round1(customDailyFromForm)
-            : numOr(
-                cellValue(customSheet.getCell(SUMMARY_CELLS.custom.dailyKwh)),
-                null,
-              ),
-        monthlyKwh: customMonthly || null,
-        estimatedAnnualLoadKwh: customAnnualLoad || null,
-      },
-    },
-  };
-}
-
-function isUsableSheetValue(value) {
-  if (value === null || value === undefined || value === "") return false;
-  if (typeof value === "number") return Number.isFinite(value);
-  if (typeof value === "string") return value.trim() !== "";
-  return true;
-}
-
-/** Keys where Excel Outputs is preferred when COM cache is fresh. */
-const SHEET_PREFERRED_OUTPUT_KEYS = new Set([
-  "recommendedSolarKwp",
-  "recommendedBatteryKwh",
-  "recommendedInverterKw",
-  "annualPvGenerationKwh",
-  "usableSolarKwh",
-  "estimatedSystemCost",
-  "grossAnnualSavings",
-  "annualOmAllowance",
-  "netAnnualSavings",
-  "simplePaybackYears",
-  "dieselSavedLitres",
-  "solarShare",
-  "gridOffset",
-  "dieselReduction",
-  "leadType",
-  "recommendedNextStep",
-  "primaryRecommendation",
-  "confidenceNote",
-  "disclaimer",
-]);
-
-/**
- * True when Outputs sizing looks consistent with Node's Excel-aligned model
- * for the same inputs (guards against stale COM formula caches).
- */
-function sheetSizingLooksFresh(sheetResults, derived) {
-  const sheetKwp = Number(sheetResults?.recommendedSolarKwp);
-  const derivedKwp = Number(derived?.recommendedSolarKwp);
-  if (!Number.isFinite(sheetKwp) || !Number.isFinite(derivedKwp)) return false;
-  if (derivedKwp <= 0) return sheetKwp <= 0;
-  const rel = Math.abs(sheetKwp - derivedKwp) / Math.max(derivedKwp, 0.1);
-  return rel <= 0.2;
-}
-
-/**
- * Prefer live Outputs sheet values after COM recalc when they look fresh.
- * Otherwise use Node derivation (aligned to live Excel formulas) so stale
- * template caches cannot win over the written assessment inputs.
- */
-function mergeOutputResults(sheetResults, derived, { forceDerived = false } = {}) {
-  const merged = { ...sheetResults };
-  const trustSheet =
-    !forceDerived && sheetSizingLooksFresh(sheetResults, derived);
-
-  for (const [key, value] of Object.entries(derived)) {
-    if (key === "summary") {
-      merged.summary = {
-        ...(sheetResults.summary || {}),
-        bill: {
-          ...(sheetResults.summary?.bill || {}),
-          ...(value.bill || {}),
-        },
-        appliance: {
-          ...(sheetResults.summary?.appliance || {}),
-          ...(value.appliance || {}),
-        },
-        custom: {
-          ...(sheetResults.summary?.custom || {}),
-          ...(value.custom || {}),
-        },
-      };
-      continue;
-    }
-
-    const sheetHasValue = isUsableSheetValue(merged[key]);
-    const derivedHasValue =
-      value !== null && value !== undefined && value !== "";
-
-    if (SHEET_PREFERRED_OUTPUT_KEYS.has(key)) {
-      if (trustSheet && sheetHasValue) continue;
-      if (derivedHasValue) merged[key] = value;
-      continue;
-    }
-
-    // Metadata (country, propertyType, …): prefer sheet when present.
-    if (sheetHasValue) continue;
-    if (derivedHasValue) merged[key] = value;
-  }
-
-  if (!trustSheet && process.env.NODE_ENV !== "production") {
-    console.warn(
-      "Excel Outputs cache looks stale vs inputs; using Excel-aligned Node derivation for sizing/financial/% fields.",
-    );
-  }
-
-  return merged;
 }
 
 function verifyWrittenInputs(workbook, formData) {
@@ -1650,51 +1326,24 @@ function snapshotKeyCells(workbook, label, formData = null) {
   return snap;
 }
 
-/**
- * Per-row Daily_kWh from form inputs when LibreOffice leaves formula caches stale.
- */
-function deriveRowDailyKwhFromForm(formData) {
-  const method = formData?.inputMethod;
-  if (method === "appliance") {
-    return (formData.appliance?.rows || [])
-      .filter((row) => Number.isFinite(Number(row.excelRow)))
-      .map((row) => {
-        const qty = Number(row.qty) || 0;
-        const hours = Number(row.hours) || 0;
-        const power = Number(row.power) || 0;
-        const duty = (Number(row.loadFactorPct) || 100) / 100;
-        return {
-          excelRow: Number(row.excelRow),
-          dailyKwh: (qty * hours * power * duty) / 1000,
-        };
-      });
-  }
-  if (method === "custom") {
-    return (formData.custom?.rows || [])
-      .filter((row) => !row.removed && Number.isFinite(Number(row.excelRow)))
-      .map((row) => {
-        const qty = Number(row.qty) || 0;
-        const hours = Number(row.hours) || 0;
-        const power = Number(row.power) || 0;
-        const loadFactor = Number(row.loadFactorPct) || 0;
-        return {
-          excelRow: Number(row.excelRow),
-          dailyKwh: (qty * hours * power * loadFactor) / 1000,
-        };
-      });
-  }
-  return [];
+function sizingOutputsMissing(sheetResults) {
+  const keys = [
+    "recommendedSolarKwp",
+    "recommendedBatteryKwh",
+    "recommendedInverterKw",
+  ];
+  return keys.every((key) => {
+    const n = Number(sheetResults?.[key]);
+    return !Number.isFinite(n);
+  });
 }
 
 /**
- * Full calculation flow: write all inputs, recalculate, read Outputs sheet.
- * Results come from Excel only when recalc freshness checks pass.
- * On LibreOffice/COM stale formula caches, fall back to Node derivation
- * aligned to the live workbook formulas (same as local Excel COM intent).
+ * Full calculation flow: write inputs, recalculate the workbook, read Outputs.
+ * Results always come from the Outputs sheet — never from Node-side formulas.
  *
- * Windows/COM: copy template → COM writes inputs + recalcs (ExcelJS writes
- * produce workbooks COM often cannot open).
- * LibreOffice: ExcelJS writeInputs → soffice recalc → read → derive if stale.
+ * Windows/COM: copy template → COM writes inputs + recalcs.
+ * LibreOffice: ExcelJS writeInputs → strip formula caches → soffice recalc → read.
  */
 export async function calculateAssessment(formData) {
   const templatePath = getTemplatePath();
@@ -1707,7 +1356,7 @@ export async function calculateAssessment(formData) {
     `[excel-debug] calculateAssessment start method=${formData?.inputMethod} property=${formData?.propertyType} template=${formData?.template} useComDirect=${useComDirect} templatePath=${templatePath}`,
   );
 
-  async function runOnce(passLabel) {
+  async function runOnce(passLabel, { odsRoundtrip = false } = {}) {
     const workPath = newWorkPath("assessment");
     let recalc = null;
     try {
@@ -1720,6 +1369,7 @@ export async function calculateAssessment(formData) {
         snapshotKeyCells(workbook, `${passLabel} before-write`, formData);
         writeInputs(workbook, formData);
         verifyWrittenInputs(workbook, formData);
+        stripCachedFormulaResults(workbook);
         snapshotKeyCells(workbook, `${passLabel} after-write`, formData);
         await workbook.xlsx.writeFile(workPath);
         excelDebugLog(
@@ -1727,7 +1377,7 @@ export async function calculateAssessment(formData) {
         );
       }
 
-      recalc = await recalculateWorkbook(workPath, formData);
+      recalc = await recalculateWorkbook(workPath, formData, { odsRoundtrip });
 
       const result = new ExcelJS.Workbook();
       await result.xlsx.readFile(recalc.outPath);
@@ -1764,63 +1414,43 @@ export async function calculateAssessment(formData) {
     }
   }
 
-  function finalizeResults(pass, { usedDerivation }) {
-    let sheetResults = pass.sheetResults;
-    if (usedDerivation) {
-      const derived = deriveAssessmentOutputs(pass.result, formData);
-      sheetResults = mergeOutputResults(sheetResults, derived, {
-        forceDerived: true,
-      });
-      const derivedRows = deriveRowDailyKwhFromForm(formData);
-      if (derivedRows.length > 0) {
-        sheetResults.rowDailyKwh = derivedRows;
-      }
-      sheetResults.calculationSource = "node-derivation";
-      console.warn(
-        `Excel Outputs stale after recalc (${pass.freshness.reason}); using Node derivation fallback.`,
-      );
-    } else {
-      sheetResults.calculationSource = useComDirect
-        ? "excel-com"
-        : "libreoffice";
-    }
+  function finalizeResults(pass) {
+    const sheetResults = pass.sheetResults;
+    sheetResults.calculationSource = useComDirect
+      ? "excel-com"
+      : "libreoffice";
 
-    if (process.env.EXCEL_DERIVE_DEBUG === "1") {
-      const derived = deriveAssessmentOutputs(pass.result, formData);
-      console.log(
-        "[EXCEL_DERIVE_DEBUG] sheet vs derived solar kWp:",
-        pass.sheetResults.recommendedSolarKwp,
-        derived.recommendedSolarKwp,
-        "source=",
-        sheetResults.calculationSource,
+    if (sizingOutputsMissing(sheetResults)) {
+      sheetResults.calculationError = pass.freshness.ok
+        ? "Outputs sizing cells were empty after recalculation."
+        : `The calculation could not be completed fully (${pass.freshness.reason}). Some values may be unavailable.`;
+      console.warn(
+        `Excel Outputs sizing empty after recalc (${pass.freshness.reason}); returning sheet values as-is.`,
+      );
+    } else if (!pass.freshness.ok) {
+      console.warn(
+        `Excel Outputs freshness check failed (${pass.freshness.reason}); returning Outputs sheet values as-is.`,
       );
     }
 
     return sheetResults;
   }
 
-  let pass = await runOnce("pass1");
+  let pass = await runOnce("pass1", { odsRoundtrip: false });
   try {
     if (pass.freshness.ok) {
-      return finalizeResults(pass, { usedDerivation: false });
+      return finalizeResults(pass);
     }
 
-    // Excel COM can recover on a fresh template copy; LibreOffice typically
-    // cannot (formula caches stay stale). Skip the expensive second soffice
-    // pass when not using COM.
-    if (useComDirect) {
-      console.warn(
-        `Excel Outputs stale after recalc (${pass.freshness.reason}); retrying with fresh template…`,
-      );
-      safeUnlink(pass.workPath);
-      if (pass.recalc) safeUnlink(pass.recalc.cleanupDir);
-      pass = await runOnce("pass2");
-      if (pass.freshness.ok) {
-        return finalizeResults(pass, { usedDerivation: false });
-      }
-    }
-
-    return finalizeResults(pass, { usedDerivation: true });
+    console.warn(
+      `Excel Outputs freshness check failed (${pass.freshness.reason}); retrying with ${
+        useComDirect ? "fresh template" : "ODS round-trip"
+      }…`,
+    );
+    safeUnlink(pass.workPath);
+    if (pass.recalc) safeUnlink(pass.recalc.cleanupDir);
+    pass = await runOnce("pass2", { odsRoundtrip: !useComDirect });
+    return finalizeResults(pass);
   } finally {
     safeUnlink(pass.workPath);
     if (pass.recalc) safeUnlink(pass.recalc.cleanupDir);
