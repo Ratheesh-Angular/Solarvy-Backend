@@ -148,10 +148,12 @@ function buildComInputsPayload(formData) {
     },
   };
 
-  if (formData.inputMethod === "bill" && formData.bill) {
-    payload.monthlyUsageKwh = toNumber(formData.bill.monthlyUsage);
-    payload.gridTariff = toNumber(formData.bill.gridTariff);
-    payload.monthlySpend = toNumber(formData.bill.monthlySpend);
+  if (formData.inputMethod === "bill") {
+    payload.monthlyUsageKwh = toNumber(formData.bill?.monthlyUsage);
+    payload.gridTariff = toNumber(formData.bill?.gridTariff);
+    payload.monthlySpend =
+      toNumber(formData.bill?.monthlySpend) ??
+      toNumber(formData.monthlyElectricityBill);
   }
 
   if (formData.inputMethod === "appliance" && formData.appliance?.rows?.length) {
@@ -560,21 +562,22 @@ function writeInputs(workbook, formData) {
   setCell(userInputs, USER_INPUT_CELLS.roofArea, toNumber(formData.roofArea));
   writeBackupDuration(userInputs, formData.backupDuration);
 
-  if (formData.inputMethod === "bill" && formData.bill) {
+  if (formData.inputMethod === "bill") {
     setCell(
       userInputs,
       USER_INPUT_CELLS.monthlyUsageKwh,
-      toNumber(formData.bill.monthlyUsage),
+      toNumber(formData.bill?.monthlyUsage),
     );
     setCell(
       userInputs,
       USER_INPUT_CELLS.gridTariff,
-      toNumber(formData.bill.gridTariff),
+      toNumber(formData.bill?.gridTariff),
     );
     setCell(
       billInput,
       BILL_INPUT_CELLS.monthlySpend,
-      toNumber(formData.bill.monthlySpend),
+      toNumber(formData.bill?.monthlySpend) ??
+        toNumber(formData.monthlyElectricityBill),
     );
   }
 
