@@ -5,8 +5,10 @@ import {
   updateDraft,
   createAssessmentFromDraft,
   getAssessmentById,
+  updateAssessmentResults,
 } from "../repositories/assessment.repository.js";
 import { calculateAssessment } from "../services/excelCalculator.service.js";
+import { withAiRecommendation } from "../services/recommendation.service.js";
 
 const router = Router();
 
@@ -150,6 +152,66 @@ router.post("/complete", async (req, res, next) => {
         results: assessment.results,
         createdAt: assessment.created_at,
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/:id/recommendation", async (req, res, next) => {
+  try {
+    const assessmentId = parseAssessmentIdParam(req.params.id);
+    if (!Number.isFinite(assessmentId)) {
+      res.status(400).json({ success: false, message: "Invalid assessment id" });
+      return;
+    }
+
+    const assessment = await getAssessmentById(assessmentId);
+
+    if (!assessment) {
+      res.status(404).json({ success: false, message: "Assessment not found" });
+      return;
+    }
+
+    const results = assessment.results;
+    if (!results || typeof results !== "object") {
+      res.status(409).json({
+        success: false,
+        message: "Assessment has no calculated results yet.",
+      });
+      return;
+    }
+
+    if (results.calculationError) {
+      res.status(409).json({
+        success: false,
+        message: "Cannot generate a recommendation while calculation is incomplete.",
+      });
+      return;
+    }
+
+    const existing = String(results.aiRecommendation || "").trim();
+    if (existing) {
+      res.json({
+        success: true,
+        data: { aiRecommendation: existing },
+      });
+      return;
+    }
+
+    const withRec = await withAiRecommendation(assessment.form_data, results);
+    const text = String(withRec?.aiRecommendation || "").trim() || null;
+
+    if (text) {
+      await updateAssessmentResults(assessment.id, {
+        ...results,
+        aiRecommendation: text,
+      });
+    }
+
+    res.json({
+      success: true,
+      data: { aiRecommendation: text },
     });
   } catch (error) {
     next(error);

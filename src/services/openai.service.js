@@ -74,6 +74,28 @@ export async function completeVisionJson({
   return content;
 }
 
+/**
+ * Plain-text chat completion (no vision, no forced JSON).
+ */
+export async function completeChatText({ systemPrompt, userPrompt }) {
+  const openai = getClient();
+  const model = getOpenAiModel();
+
+  const response = await openai.chat.completions.create({
+    model,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+  });
+
+  const content = response.choices?.[0]?.message?.content;
+  if (!content || typeof content !== "string") {
+    throw new Error("OpenAI returned an empty text response");
+  }
+  return content;
+}
+
 async function completePdfJson({
   openai,
   model,

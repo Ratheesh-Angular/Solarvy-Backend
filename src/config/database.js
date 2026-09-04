@@ -106,12 +106,21 @@ async function seedAppSettings() {
     BILL_ANALYZER_SETTING_KEY,
     DEFAULT_BILL_ANALYZER_SYSTEM_PROMPT,
   } = await import("./billAnalyzerDefaults.js");
+  const {
+    RECOMMENDATION_SETTING_KEY,
+    DEFAULT_RECOMMENDATION_SYSTEM_PROMPT,
+  } = await import("./recommendationDefaults.js");
 
   await pool.query(
     `INSERT INTO app_settings (key, value, updated_at)
-     VALUES ($1, $2, NOW())
+     VALUES ($1, $2, NOW()), ($3, $4, NOW())
      ON CONFLICT (key) DO NOTHING`,
-    [BILL_ANALYZER_SETTING_KEY, DEFAULT_BILL_ANALYZER_SYSTEM_PROMPT],
+    [
+      BILL_ANALYZER_SETTING_KEY,
+      DEFAULT_BILL_ANALYZER_SYSTEM_PROMPT,
+      RECOMMENDATION_SETTING_KEY,
+      DEFAULT_RECOMMENDATION_SYSTEM_PROMPT,
+    ],
   );
 }
 

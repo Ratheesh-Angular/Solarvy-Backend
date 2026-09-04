@@ -80,3 +80,15 @@ export async function getAssessmentById(id) {
 
   return result.rows[0] ?? null;
 }
+
+export async function updateAssessmentResults(id, results) {
+  const result = await getPool().query(
+    `UPDATE assessments
+     SET results = $2, updated_at = NOW()
+     WHERE id = $1
+     RETURNING id, draft_id, form_data, results, created_at, updated_at`,
+    [id, results ? JSON.stringify(results) : null],
+  );
+
+  return result.rows[0] ?? null;
+}

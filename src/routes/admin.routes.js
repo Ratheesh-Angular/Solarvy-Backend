@@ -8,6 +8,11 @@ import {
   withBillAnalyzerContextPreamble,
 } from "../config/billAnalyzerDefaults.js";
 import {
+  DEFAULT_RECOMMENDATION_SYSTEM_PROMPT,
+  RECOMMENDATION_SETTING_KEY,
+  withRecommendationContextPreamble,
+} from "../config/recommendationDefaults.js";
+import {
   getSetting,
   upsertSetting,
 } from "../repositories/appSettings.repository.js";
@@ -170,6 +175,62 @@ router.put("/ai-prompts/bill", requireAdmin, async (req, res, next) => {
     res.json({
       success: true,
       message: "Bill AI prompt updated",
+      data: {
+        key: row.key,
+        value: row.value,
+        updatedAt: row.updatedAt,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+const RECOMMENDATION_PROMPT_MAX_LEN = 50_000;
+
+router.get("/ai-prompts/recommendation", requireAdmin, async (_req, res, next) => {
+  try {
+    const row = await getSetting(RECOMMENDATION_SETTING_KEY);
+    res.json({
+      success: true,
+      data: {
+        key: RECOMMENDATION_SETTING_KEY,
+        value: withRecommendationContextPreamble(
+          row?.value ?? DEFAULT_RECOMMENDATION_SYSTEM_PROMPT,
+        ),
+        updatedAt: row?.updatedAt ?? null,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.put("/ai-prompts/recommendation", requireAdmin, async (req, res, next) => {
+  try {
+    const value =
+      typeof req.body?.value === "string" ? req.body.value.trim() : "";
+
+    if (!value) {
+      res.status(400).json({
+        success: false,
+        message: "Prompt value is required",
+      });
+      return;
+    }
+
+    if (value.length > RECOMMENDATION_PROMPT_MAX_LEN) {
+      res.status(400).json({
+        success: false,
+        message: `Prompt must be at most ${RECOMMENDATION_PROMPT_MAX_LEN} characters`,
+      });
+      return;
+    }
+
+    const row = await upsertSetting(RECOMMENDATION_SETTING_KEY, value);
+    res.json({
+      success: true,
+      message: "Recommendation AI prompt updated",
       data: {
         key: row.key,
         value: row.value,
