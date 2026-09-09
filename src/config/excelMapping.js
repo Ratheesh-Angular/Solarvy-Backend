@@ -42,6 +42,18 @@ export const SHEETS = {
   customEquipment: "Custom_Equipment",
   outputs: "Outputs",
   strategyComparison: "Strategy_Comparison",
+  pdfInputs: "PDF Inputs",
+};
+
+/**
+ * PDF Inputs — illustrative energy cost comparison (Solar / Grid / Diesel).
+ * Labels in column A, NGN/kWh values in column B (rows 53–55).
+ */
+export const PDF_INPUTS_COST_COMPARISON = {
+  sheet: SHEETS.pdfInputs,
+  rows: [53, 54, 55],
+  labelCol: "A",
+  valueCol: "B",
 };
 
 /**

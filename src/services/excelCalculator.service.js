@@ -21,6 +21,7 @@ import {
   ESTIMATED_ANNUAL_LOAD_CELLS,
   OUTPUT_LIVE_SUMMARY_CELLS,
   STRATEGY_COMPARISON,
+  PDF_INPUTS_COST_COMPARISON,
 } from "../config/excelMapping.js";
 import { cellValue } from "./excelReader.service.js";
 
@@ -833,6 +834,29 @@ function readOutputs(workbook) {
         ),
       }),
     );
+  }
+
+  // PDF Inputs!A53:B55 — illustrative energy cost comparison (Solar / Grid / Diesel)
+  const pdfInputsSheet = workbook.getWorksheet(PDF_INPUTS_COST_COMPARISON.sheet);
+  if (pdfInputsSheet) {
+    const { rows, labelCol, valueCol } = PDF_INPUTS_COST_COMPARISON;
+    const costKeys = ["solarCostPerKwh", "gridCostPerKwh", "dieselCostPerKwh"];
+    results.energyCostComparison = rows.map((row, index) => {
+      const label = String(
+        cellValue(pdfInputsSheet.getCell(`${labelCol}${row}`)) ?? "",
+      ).trim();
+      const value = cellValue(pdfInputsSheet.getCell(`${valueCol}${row}`));
+      const num =
+        value == null || value === ""
+          ? null
+          : Number.isFinite(Number(value))
+            ? Number(value)
+            : null;
+      if (costKeys[index]) {
+        results[costKeys[index]] = num;
+      }
+      return { label, value: num };
+    });
   }
 
   return results;
