@@ -1,11 +1,16 @@
 import { getPool } from "../config/database.js";
+import { isUuid } from "../utils/requestMeta.js";
 
-export async function createDraft(formData) {
+export async function createDraft(formData, { visitorId = null, sessionId = null } = {}) {
   const result = await getPool().query(
-    `INSERT INTO assessment_drafts (form_data)
-     VALUES ($1)
-     RETURNING id, form_data, created_at, updated_at`,
-    [JSON.stringify(formData ?? {})],
+    `INSERT INTO assessment_drafts (form_data, visitor_id, session_id)
+     VALUES ($1, $2, $3)
+     RETURNING id, form_data, visitor_id, session_id, created_at, updated_at`,
+    [
+      JSON.stringify(formData ?? {}),
+      isUuid(visitorId) ? visitorId : null,
+      isUuid(sessionId) ? sessionId : null,
+    ],
   );
 
   return result.rows[0];
@@ -13,7 +18,7 @@ export async function createDraft(formData) {
 
 export async function getDraftById(id) {
   const result = await getPool().query(
-    `SELECT id, form_data, created_at, updated_at
+    `SELECT id, form_data, visitor_id, session_id, created_at, updated_at
      FROM assessment_drafts
      WHERE id = $1`,
     [id],
@@ -27,14 +32,19 @@ export async function updateDraft(id, formData) {
     `UPDATE assessment_drafts
      SET form_data = $2, updated_at = NOW()
      WHERE id = $1
-     RETURNING id, form_data, created_at, updated_at`,
+     RETURNING id, form_data, visitor_id, session_id, created_at, updated_at`,
     [id, JSON.stringify(formData ?? {})],
   );
 
   return result.rows[0] ?? null;
 }
 
-export async function createAssessmentFromDraft(draftId, formData, results = null) {
+export async function createAssessmentFromDraft(
+  draftId,
+  formData,
+  results = null,
+  { visitorId = null, sessionId = null } = {},
+) {
   const client = await getPool().connect();
 
   try {
@@ -50,13 +60,15 @@ export async function createAssessmentFromDraft(draftId, formData, results = nul
     }
 
     const result = await client.query(
-      `INSERT INTO assessments (draft_id, form_data, results)
-       VALUES ($1, $2, $3)
-       RETURNING id, draft_id, form_data, results, created_at`,
+      `INSERT INTO assessments (draft_id, form_data, results, visitor_id, session_id)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, draft_id, form_data, results, visitor_id, session_id, created_at`,
       [
         draftId || null,
         JSON.stringify(formData ?? {}),
         results ? JSON.stringify(results) : null,
+        isUuid(visitorId) ? visitorId : null,
+        isUuid(sessionId) ? sessionId : null,
       ],
     );
 
@@ -72,7 +84,7 @@ export async function createAssessmentFromDraft(draftId, formData, results = nul
 
 export async function getAssessmentById(id) {
   const result = await getPool().query(
-    `SELECT id, draft_id, form_data, results, created_at, updated_at
+    `SELECT id, draft_id, form_data, results, visitor_id, session_id, created_at, updated_at
      FROM assessments
      WHERE id = $1`,
     [id],
@@ -86,7 +98,7 @@ export async function updateAssessmentResults(id, results) {
     `UPDATE assessments
      SET results = $2, updated_at = NOW()
      WHERE id = $1
-     RETURNING id, draft_id, form_data, results, created_at, updated_at`,
+     RETURNING id, draft_id, form_data, results, visitor_id, session_id, created_at, updated_at`,
     [id, results ? JSON.stringify(results) : null],
   );
 

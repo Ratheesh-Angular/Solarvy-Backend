@@ -22,6 +22,7 @@ import {
   OUTPUT_LIVE_SUMMARY_CELLS,
   STRATEGY_COMPARISON,
   PDF_INPUTS_COST_COMPARISON,
+  INSTALLER_RESULTS_TABLE,
 } from "../config/excelMapping.js";
 import { cellValue } from "./excelReader.service.js";
 
@@ -859,7 +860,85 @@ function readOutputs(workbook) {
     });
   }
 
+  // Installer_Results_Output — matched installer cards (A16:K…)
+  results.installerMatches = readInstallerMatches(workbook);
+
   return results;
+}
+
+/**
+ * Normalize Match % to a 0–100 number.
+ * Excel may return 0.92, 92, or "92%" (latter already coerced toward 0–1 by cellValue).
+ */
+function coerceMatchPercent(raw) {
+  if (raw === null || raw === undefined || raw === "") return null;
+  const n = typeof raw === "number" ? raw : Number(String(raw).replace(/%/g, "").trim());
+  if (!Number.isFinite(n)) return null;
+  if (n > 0 && n <= 1) return Math.round(n * 1000) / 10; // keep one decimal if needed
+  return Math.round(n * 10) / 10;
+}
+
+function asNullableString(raw) {
+  if (raw === null || raw === undefined || raw === "") return null;
+  const s = String(raw).trim();
+  return s || null;
+}
+
+function asNullableNumber(raw) {
+  if (raw === null || raw === undefined || raw === "") return null;
+  const n = typeof raw === "number" ? raw : Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+function readInstallerMatches(workbook) {
+  const sheet = workbook.getWorksheet(INSTALLER_RESULTS_TABLE.sheet);
+  if (!sheet) return [];
+
+  const { startRow, endRow, columns: cols } = INSTALLER_RESULTS_TABLE;
+  const rows = [];
+
+  for (let r = startRow; r <= endRow; r++) {
+    const installerName = asNullableString(
+      cellValue(sheet.getCell(`${cols.installerName}${r}`)),
+    );
+    if (!installerName) continue;
+
+    rows.push({
+      cardNumber: asNullableNumber(
+        cellValue(sheet.getCell(`${cols.cardNumber}${r}`)),
+      ),
+      installerName,
+      matchPct: coerceMatchPercent(
+        cellValue(sheet.getCell(`${cols.matchPct}${r}`)),
+      ),
+      matchTier: asNullableString(
+        cellValue(sheet.getCell(`${cols.matchTier}${r}`)),
+      ),
+      bestSuitedFor: asNullableString(
+        cellValue(sheet.getCell(`${cols.bestSuitedFor}${r}`)),
+      ),
+      coverage: asNullableString(
+        cellValue(sheet.getCell(`${cols.coverage}${r}`)),
+      ),
+      strengths: asNullableString(
+        cellValue(sheet.getCell(`${cols.strengths}${r}`)),
+      ),
+      pricing: asNullableString(
+        cellValue(sheet.getCell(`${cols.pricing}${r}`)),
+      ),
+      response: asNullableString(
+        cellValue(sheet.getCell(`${cols.response}${r}`)),
+      ),
+      primaryCta: asNullableString(
+        cellValue(sheet.getCell(`${cols.primaryCta}${r}`)),
+      ),
+      secondaryCta: asNullableString(
+        cellValue(sheet.getCell(`${cols.secondaryCta}${r}`)),
+      ),
+    });
+  }
+
+  return rows;
 }
 
 /**

@@ -9,22 +9,14 @@ import {
 } from "../repositories/assessment.repository.js";
 import { calculateAssessment } from "../services/excelCalculator.service.js";
 import { withAiRecommendation } from "../services/recommendation.service.js";
+import { createActivityEvent } from "../repositories/activity.repository.js";
+import {
+  formatAssessmentId,
+  parseAssessmentIdParam,
+} from "../utils/assessmentId.js";
+import { resolveVisitorContext } from "../utils/resolveVisitorContext.js";
 
 const router = Router();
-
-function formatAssessmentId(id) {
-  return `SV-${String(id).padStart(4, "0")}`;
-}
-
-function parseAssessmentIdParam(value) {
-  if (!value) return NaN;
-  const normalized = String(value).trim().toUpperCase();
-  const match = normalized.match(/^SV-(\d+)$/);
-  if (match) {
-    return Number(match[1]);
-  }
-  return Number(normalized);
-}
 
 async function runExcelCalculation(formData) {
   try {
@@ -39,7 +31,19 @@ async function runExcelCalculation(formData) {
 
 router.post("/drafts", async (req, res, next) => {
   try {
-    const draft = await createDraft(req.body.formData ?? req.body);
+    const meta = await resolveVisitorContext(req);
+    const draft = await createDraft(req.body.formData ?? req.body, meta);
+
+    await createActivityEvent({
+      visitorId: meta.visitorId,
+      sessionId: meta.sessionId,
+      eventType: "assessment_started",
+      path: "/start-assessment",
+      entityType: "assessment_draft",
+      entityId: String(draft.id),
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    }).catch(() => {});
 
     res.status(201).json({
       success: true,
@@ -116,9 +120,29 @@ router.post("/drafts/:id/complete", async (req, res, next) => {
       return;
     }
 
+    const meta = await resolveVisitorContext(req);
     const formData = req.body.formData ?? req.body;
     const results = await runExcelCalculation(formData);
-    const assessment = await createAssessmentFromDraft(draftId, formData, results);
+    const assessment = await createAssessmentFromDraft(
+      draftId,
+      formData,
+      results,
+      {
+        visitorId: meta.visitorId || draft.visitor_id,
+        sessionId: meta.sessionId || draft.session_id,
+      },
+    );
+
+    await createActivityEvent({
+      visitorId: meta.visitorId || draft.visitor_id,
+      sessionId: meta.sessionId || draft.session_id,
+      eventType: "assessment_completed",
+      path: "/start-assessment",
+      entityType: "assessment",
+      entityId: formatAssessmentId(assessment.id),
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    }).catch(() => {});
 
     res.status(201).json({
       success: true,
@@ -138,9 +162,21 @@ router.post("/drafts/:id/complete", async (req, res, next) => {
 
 router.post("/complete", async (req, res, next) => {
   try {
+    const meta = await resolveVisitorContext(req);
     const formData = req.body.formData ?? req.body;
     const results = await runExcelCalculation(formData);
-    const assessment = await createAssessmentFromDraft(null, formData, results);
+    const assessment = await createAssessmentFromDraft(null, formData, results, meta);
+
+    await createActivityEvent({
+      visitorId: meta.visitorId,
+      sessionId: meta.sessionId,
+      eventType: "assessment_completed",
+      path: "/start-assessment",
+      entityType: "assessment",
+      entityId: formatAssessmentId(assessment.id),
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    }).catch(() => {});
 
     res.status(201).json({
       success: true,

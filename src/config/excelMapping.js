@@ -43,6 +43,30 @@ export const SHEETS = {
   outputs: "Outputs",
   strategyComparison: "Strategy_Comparison",
   pdfInputs: "PDF Inputs",
+  installerResultsOutput: "Installer_Results_Output",
+};
+
+/**
+ * Installer_Results_Output table (headers at row 15, data from row 16).
+ * Columns A–K: Card # through Secondary CTA.
+ */
+export const INSTALLER_RESULTS_TABLE = {
+  sheet: SHEETS.installerResultsOutput,
+  startRow: 16,
+  endRow: 30,
+  columns: {
+    cardNumber: "A",
+    installerName: "B",
+    matchPct: "C",
+    matchTier: "D",
+    bestSuitedFor: "E",
+    coverage: "F",
+    strengths: "G",
+    pricing: "H",
+    response: "I",
+    primaryCta: "J",
+    secondaryCta: "K",
+  },
 };
 
 /**

@@ -6,6 +6,7 @@ import morgan from "morgan";
 import { connectDatabase, disconnectDatabase } from "./config/database.js";
 import { createCorsOptions, getAllowedOrigins } from "./config/cors.js";
 import { getServerConfig, isProduction, validateEnv } from "./config/env.js";
+import { ensureUploadDirs } from "./services/fileStorage.service.js";
 import apiRoutes from "./routes/index.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 
@@ -58,6 +59,7 @@ const SHUTDOWN_TIMEOUT_MS = 10_000;
 
 async function startServer() {
   await connectDatabase();
+  await ensureUploadDirs();
 
   const server = app.listen(port, host, () => {
     console.log(`Solarvy API listening on ${host}:${port}`);

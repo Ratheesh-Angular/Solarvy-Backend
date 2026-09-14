@@ -78,22 +78,60 @@ export async function completeVisionJson({
  * Plain-text chat completion (no vision, no forced JSON).
  */
 export async function completeChatText({ systemPrompt, userPrompt }) {
-  const openai = getClient();
-  const model = getOpenAiModel();
-
-  const response = await openai.chat.completions.create({
-    model,
+  return completeChatMessages({
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
   });
+}
 
-  const content = response.choices?.[0]?.message?.content;
-  if (!content || typeof content !== "string") {
-    throw new Error("OpenAI returned an empty text response");
+/**
+ * Multi-turn chat completion. `messages` should include system + history turns.
+ */
+export async function completeChatMessages({
+  messages,
+  timeoutMs = 45_000,
+} = {}) {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    throw new Error("Chat messages are required");
   }
-  return content;
+
+  const openai = getClient();
+  const model = getOpenAiModel();
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await openai.chat.completions.create(
+      {
+        model,
+        messages,
+      },
+      { signal: controller.signal },
+    );
+
+    const content = response.choices?.[0]?.message?.content;
+    if (!content || typeof content !== "string") {
+      throw new Error("OpenAI returned an empty text response");
+    }
+    return content;
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      const timeoutError = new Error("OpenAI request timed out");
+      timeoutError.code = "OPENAI_TIMEOUT";
+      throw timeoutError;
+    }
+    if (error?.status === 429 || error?.code === "rate_limit_exceeded") {
+      const rateError = new Error("OpenAI rate limit exceeded");
+      rateError.code = "OPENAI_RATE_LIMIT";
+      throw rateError;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function completePdfJson({
