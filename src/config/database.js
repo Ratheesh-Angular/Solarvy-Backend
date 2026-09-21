@@ -215,6 +215,12 @@ async function initSchema(db) {
   await ensureColumn(db, "expert_reviews", "size_bytes", "INTEGER DEFAULT 0");
   await ensureColumn(db, "expert_reviews", "storage_path", "TEXT DEFAULT ''");
   await ensureColumn(db, "quote_uploads", "location", "VARCHAR(255) DEFAULT ''");
+  await ensureColumn(
+    db,
+    "quote_uploads",
+    "additional_notes",
+    "TEXT DEFAULT ''",
+  );
   await ensureColumn(db, "visitors", "user_number", "INTEGER");
 
   // Backfill sequential user_number for existing visitors, then enforce uniqueness.

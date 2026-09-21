@@ -41,6 +41,7 @@ router.post("/", upload.single("file"), async (req, res, next) => {
       email: String(req.body?.email || "").trim().toLowerCase(),
       phoneNumber: String(req.body?.phoneNumber || "").trim(),
       location: String(req.body?.location || "").trim(),
+      additionalNotes: String(req.body?.additionalNotes || "").trim(),
       originalName: saved.originalName,
       storedName: saved.storedName,
       mimeType: saved.mimeType,

@@ -5,8 +5,8 @@ export async function createQuoteUpload(data) {
   const result = await getPool().query(
     `INSERT INTO quote_uploads (
        visitor_id, session_id, assessment_id, full_name, email, phone_number,
-       location, original_name, stored_name, mime_type, size_bytes, storage_path
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       location, additional_notes, original_name, stored_name, mime_type, size_bytes, storage_path
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
      RETURNING id, created_at`,
     [
       isUuid(data.visitorId) ? data.visitorId : null,
@@ -16,6 +16,7 @@ export async function createQuoteUpload(data) {
       data.email || "",
       data.phoneNumber || "",
       data.location || "",
+      data.additionalNotes || "",
       data.originalName,
       data.storedName,
       data.mimeType || "",
