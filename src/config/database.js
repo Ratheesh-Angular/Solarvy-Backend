@@ -158,6 +158,7 @@ async function initSchema(db) {
       email VARCHAR(255) DEFAULT '',
       phone_number VARCHAR(50) DEFAULT '',
       location VARCHAR(255) DEFAULT '',
+      additional_notes TEXT DEFAULT '',
       original_name VARCHAR(255) NOT NULL DEFAULT '',
       stored_name VARCHAR(255) NOT NULL DEFAULT '',
       mime_type VARCHAR(120) DEFAULT '',
