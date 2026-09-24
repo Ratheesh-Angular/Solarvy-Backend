@@ -8,7 +8,10 @@ import {
   updateAssessmentResults,
 } from "../repositories/assessment.repository.js";
 import { calculateAssessment } from "../services/excelCalculator.service.js";
-import { withAiRecommendation } from "../services/recommendation.service.js";
+import {
+  withAiRecommendation,
+  withQuickSnapshotRecommendation,
+} from "../services/recommendation.service.js";
 import { createActivityEvent } from "../repositories/activity.repository.js";
 import {
   formatAssessmentId,
@@ -239,8 +242,13 @@ router.post("/:id/recommendation", async (req, res, next) => {
     const text = String(withRec?.aiRecommendation || "").trim() || null;
 
     if (text) {
+      const latest = await getAssessmentById(assessment.id);
+      const latestResults =
+        latest?.results && typeof latest.results === "object"
+          ? latest.results
+          : results;
       await updateAssessmentResults(assessment.id, {
-        ...results,
+        ...latestResults,
         aiRecommendation: text,
       });
     }
@@ -248,6 +256,76 @@ router.post("/:id/recommendation", async (req, res, next) => {
     res.json({
       success: true,
       data: { aiRecommendation: text },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/:id/quick-snapshot-recommendation", async (req, res, next) => {
+  try {
+    const assessmentId = parseAssessmentIdParam(req.params.id);
+    if (!Number.isFinite(assessmentId)) {
+      res.status(400).json({ success: false, message: "Invalid assessment id" });
+      return;
+    }
+
+    const assessment = await getAssessmentById(assessmentId);
+
+    if (!assessment) {
+      res.status(404).json({ success: false, message: "Assessment not found" });
+      return;
+    }
+
+    const results = assessment.results;
+    if (!results || typeof results !== "object") {
+      res.status(409).json({
+        success: false,
+        message: "Assessment has no calculated results yet.",
+      });
+      return;
+    }
+
+    if (results.calculationError) {
+      res.status(409).json({
+        success: false,
+        message:
+          "Cannot generate a recommendation while calculation is incomplete.",
+      });
+      return;
+    }
+
+    const existing = String(results.quickSnapshotRecommendation || "").trim();
+    if (existing) {
+      res.json({
+        success: true,
+        data: { quickSnapshotRecommendation: existing },
+      });
+      return;
+    }
+
+    const withRec = await withQuickSnapshotRecommendation(
+      assessment.form_data,
+      results,
+    );
+    const text =
+      String(withRec?.quickSnapshotRecommendation || "").trim() || null;
+
+    if (text) {
+      const latest = await getAssessmentById(assessment.id);
+      const latestResults =
+        latest?.results && typeof latest.results === "object"
+          ? latest.results
+          : results;
+      await updateAssessmentResults(assessment.id, {
+        ...latestResults,
+        quickSnapshotRecommendation: text,
+      });
+    }
+
+    res.json({
+      success: true,
+      data: { quickSnapshotRecommendation: text },
     });
   } catch (error) {
     next(error);

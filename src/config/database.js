@@ -294,6 +294,8 @@ async function seedAppSettings() {
   const {
     RECOMMENDATION_SETTING_KEY,
     DEFAULT_RECOMMENDATION_SYSTEM_PROMPT,
+    QUICK_SNAPSHOT_RECOMMENDATION_SETTING_KEY,
+    DEFAULT_QUICK_SNAPSHOT_RECOMMENDATION_SYSTEM_PROMPT,
   } = await import("./recommendationDefaults.js");
   const {
     CHATBOT_SETTING_KEY,
@@ -302,13 +304,15 @@ async function seedAppSettings() {
 
   await pool.query(
     `INSERT INTO app_settings (key, value, updated_at)
-     VALUES ($1, $2, NOW()), ($3, $4, NOW()), ($5, $6, NOW())
+     VALUES ($1, $2, NOW()), ($3, $4, NOW()), ($5, $6, NOW()), ($7, $8, NOW())
      ON CONFLICT (key) DO NOTHING`,
     [
       BILL_ANALYZER_SETTING_KEY,
       DEFAULT_BILL_ANALYZER_SYSTEM_PROMPT,
       RECOMMENDATION_SETTING_KEY,
       DEFAULT_RECOMMENDATION_SYSTEM_PROMPT,
+      QUICK_SNAPSHOT_RECOMMENDATION_SETTING_KEY,
+      DEFAULT_QUICK_SNAPSHOT_RECOMMENDATION_SYSTEM_PROMPT,
       CHATBOT_SETTING_KEY,
       DEFAULT_CHATBOT_SYSTEM_PROMPT,
     ],

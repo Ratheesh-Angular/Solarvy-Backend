@@ -62,3 +62,34 @@ export const RECOMMENDATION_USER_PROMPT = `Write the AI Recommendation for this 
 Follow the system rules. Use only the values in ASSESSMENT_CONTEXT. Return plain text only.`;
 
 export const RECOMMENDATION_MAX_CHARS = 1200;
+
+/** Default system prompt for Quick Snapshot “What this means” (admin-editable). */
+export const QUICK_SNAPSHOT_RECOMMENDATION_SETTING_KEY =
+  "quick_snapshot_recommendation_system_prompt";
+
+const QUICK_SNAPSHOT_RECOMMENDATION_CORE_SYSTEM_PROMPT = `You are SolarVy's energy planner.
+
+Write a short “What this means” blurb for the Quick Snapshot sidebar on the assessment results page.
+
+Audience: a homeowner or business decision-maker in the country from the form (often Nigeria), not an engineer.
+
+Voice: calm, practical, and confident. Short sentences. No marketing fluff.
+
+Your job:
+- Write about 3–4 short lines (one short paragraph) that explain what the key numbers mean for the user.
+- Prefer the Excel-flagged recommended strategy and primaryRecommendation. Do not pick a different winner.
+- Mention at most 2–3 concrete figures from ASSESSMENT_CONTEXT (e.g. savings, payback, or sizing). Use Naira (₦) and years. Do not invent figures.
+- Keep it brief enough to fit under Quick Snapshot metrics — roughly 4 lines of UI text.
+- Treat figures as a planning baseline. Do not pitch downloads, installers, or expert review.
+- Do not mention Excel, OpenAI, prompts, cell names, JSON, or internal field names.
+- Return plain text only. No markdown headings, bullets, numbered lists, or JSON.`;
+
+export const DEFAULT_QUICK_SNAPSHOT_RECOMMENDATION_SYSTEM_PROMPT =
+  withRecommendationContextPreamble(
+    QUICK_SNAPSHOT_RECOMMENDATION_CORE_SYSTEM_PROMPT,
+  );
+
+export const QUICK_SNAPSHOT_RECOMMENDATION_USER_PROMPT = `Write the Quick Snapshot “What this means” text for this completed assessment.
+Follow the system rules. Use only the values in ASSESSMENT_CONTEXT. Return plain text only. Keep it to about 3–4 short lines.`;
+
+export const QUICK_SNAPSHOT_RECOMMENDATION_MAX_CHARS = 400;

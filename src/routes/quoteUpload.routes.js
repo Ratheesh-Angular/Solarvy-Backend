@@ -55,7 +55,7 @@ router.post("/", upload.single("file"), async (req, res, next) => {
       visitorId,
       sessionId,
       eventType: "quote_upload_submitted",
-      path: "/matched-installers",
+      path: String(req.body?.path || "/matched-installers").trim() || "/matched-installers",
       entityType: "quote_upload",
       entityId: String(row.id),
       metadata: {
