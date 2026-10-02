@@ -103,6 +103,14 @@ try {
         }
       }
     }
+    if ($null -ne $inputs.gridUnavailableBand -and "$($inputs.gridUnavailableBand)" -ne "") {
+      Set-CellValue $ui "B61" $inputs.gridUnavailableBand
+      Write-Output "COM_SET B61=$($ui.Range('B61').Value2)"
+    }
+    if ($null -ne $inputs.monthlyGeneratorFuelSpend -and "$($inputs.monthlyGeneratorFuelSpend)" -ne "") {
+      Set-CellValue $ui "B62" ([double]$inputs.monthlyGeneratorFuelSpend)
+      Write-Output "COM_SET B62=$($ui.Range('B62').Value2)"
+    }
     if ($null -ne $inputs.gridTariff -and "$($inputs.gridTariff)" -ne "") {
       Set-CellValue $ui "B30" ([double]$inputs.gridTariff)
     }

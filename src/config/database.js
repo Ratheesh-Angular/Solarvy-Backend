@@ -191,6 +191,39 @@ async function initSchema(db) {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS blogs (
+      id SERIAL PRIMARY KEY,
+      slug VARCHAR(200) UNIQUE NOT NULL,
+      title VARCHAR(300) NOT NULL,
+      excerpt TEXT NOT NULL DEFAULT '',
+      content_html TEXT NOT NULL DEFAULT '',
+      featured_image_path TEXT NOT NULL DEFAULT '',
+      featured_image_alt VARCHAR(300) NOT NULL DEFAULT '',
+      category VARCHAR(120) NOT NULL DEFAULT '',
+      tags TEXT[] NOT NULL DEFAULT '{}',
+      author_name VARCHAR(160) NOT NULL DEFAULT 'SolarVy Team',
+      status VARCHAR(20) NOT NULL DEFAULT 'draft',
+      published_at TIMESTAMPTZ NULL,
+      meta_title VARCHAR(300) NOT NULL DEFAULT '',
+      meta_description TEXT NOT NULL DEFAULT '',
+      og_image_path TEXT NOT NULL DEFAULT '',
+      reading_time_minutes INTEGER NOT NULL DEFAULT 1,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS blog_views (
+      id BIGSERIAL PRIMARY KEY,
+      blog_id INTEGER NOT NULL REFERENCES blogs(id) ON DELETE CASCADE,
+      visitor_id UUID NULL,
+      session_id UUID NULL,
+      visitor_key VARCHAR(128) NOT NULL,
+      referrer TEXT NOT NULL DEFAULT '',
+      ip VARCHAR(64) NOT NULL DEFAULT '',
+      user_agent TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
   `);
 
   await ensureColumn(db, "assessment_drafts", "visitor_id", "UUID NULL");
@@ -278,6 +311,10 @@ async function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_chat_sessions_updated ON chat_sessions (updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages (session_id, created_at ASC);
     CREATE INDEX IF NOT EXISTS idx_faq_entries_active_sort ON faq_entries (is_active, sort_order ASC, id ASC);
+    CREATE INDEX IF NOT EXISTS idx_blogs_status_published ON blogs (status, published_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_blog_views_blog_created ON blog_views (blog_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_blog_views_blog_visitor ON blog_views (blog_id, visitor_key, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_blog_views_created ON blog_views (created_at DESC);
   `);
 }
 

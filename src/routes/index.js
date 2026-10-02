@@ -9,6 +9,8 @@ import adminRoutes from "./admin.routes.js";
 import trackingRoutes from "./tracking.routes.js";
 import quoteUploadRoutes from "./quoteUpload.routes.js";
 import chatRoutes from "./chat.routes.js";
+import blogRoutes from "./blog.routes.js";
+import adminBlogRoutes from "./adminBlog.routes.js";
 
 const router = Router();
 
@@ -21,6 +23,8 @@ router.use("/assessments", assessmentRoutes);
 router.use("/excel", excelRoutes);
 router.use("/bills", billsRoutes);
 router.use("/chat", chatRoutes);
+router.use("/blogs", blogRoutes);
+router.use("/admin/blogs", adminBlogRoutes);
 router.use("/admin", adminRoutes);
 
 export default router;

@@ -6,7 +6,10 @@ import morgan from "morgan";
 import { connectDatabase, disconnectDatabase } from "./config/database.js";
 import { createCorsOptions, getAllowedOrigins } from "./config/cors.js";
 import { getServerConfig, isProduction, validateEnv } from "./config/env.js";
-import { ensureUploadDirs } from "./services/fileStorage.service.js";
+import {
+  ensureUploadDirs,
+  getBlogImagesDir,
+} from "./services/fileStorage.service.js";
 import apiRoutes from "./routes/index.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 
@@ -49,6 +52,16 @@ app.get("/", (_req, res) => {
     apiUrl,
   });
 });
+
+app.use(
+  "/api/uploads/blog-images",
+  express.static(getBlogImagesDir(), {
+    index: false,
+    dotfiles: "deny",
+    maxAge: "30d",
+    immutable: true,
+  }),
+);
 
 app.use("/api", apiRoutes);
 

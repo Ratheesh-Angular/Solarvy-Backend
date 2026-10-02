@@ -116,6 +116,9 @@ export const USER_INPUT_CELLS = {
   // Bill_Input!B7 derives tariff from this fallback input; writing Bill_Input!B7
   // directly would destroy the client's formula.
   gridTariff: "B30",
+  /** Grid unavailability band label (drives B20 via LOOKUP). */
+  gridUnavailableBand: "B61",
+  monthlyGeneratorFuelSpend: "B62",
 };
 
 export const BILL_INPUT_CELLS = {
@@ -190,6 +193,13 @@ export const DROPDOWN_FALLBACKS = {
   ],
   countries: ["Nigeria", "Ghana", "Kenya"],
   backupDurations: ["1", "2", "3", "4", "5", "6", "7", "8"],
+  gridUnavailableBands: [
+    "0-2 hours",
+    "3-6 hours",
+    "7-12 hours",
+    "13-18 hours",
+    "19-24 hours",
+  ],
 };
 
 export const STATE_RANGE = "I4:I40";

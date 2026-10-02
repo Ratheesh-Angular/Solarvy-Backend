@@ -141,6 +141,28 @@ async function loadCatalogs() {
   const backupDurations =
     parseValidationList(userInputs, "B25") || DROPDOWN_FALLBACKS.backupDurations;
 
+  let gridUnavailableBands = parseValidationList(userInputs, "B61");
+  if (!gridUnavailableBands?.length) {
+    const f61 = cellValue(userInputs.getCell("F61"));
+    if (f61) {
+      gridUnavailableBands = String(f61)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    }
+  }
+  if (!gridUnavailableBands?.length) {
+    gridUnavailableBands = DROPDOWN_FALLBACKS.gridUnavailableBands;
+  }
+
+  const gridUnavailableQuestion =
+    String(cellValue(userInputs.getCell("C61")) ?? "").trim() ||
+    "On a typical day, how many hours is grid power unavailable?";
+
+  const monthlyGeneratorFuelLabel =
+    String(cellValue(userInputs.getCell("A62")) ?? "").trim() ||
+    "Monthly Generator Fuel Spend";
+
   // Dependent template lists: defined names Home/Hotel/... -> User_Inputs L-column ranges
   const templatesByProperty = {};
   for (const property of propertyTypes) {
@@ -211,6 +233,9 @@ async function loadCatalogs() {
     states,
     cities,
     backupDurations,
+    gridUnavailableBands,
+    gridUnavailableQuestion,
+    monthlyGeneratorFuelLabel,
     equipmentCatalog,
   };
 }

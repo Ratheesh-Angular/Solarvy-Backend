@@ -41,6 +41,8 @@ const sampleForm = {
   country: "Nigeria",
   city: "Lagos",
   powerSetup: "Grid + Generator",
+  gridUnavailableBand: "7-12 hours",
+  monthlyGeneratorFuelSpend: "1200",
   inputMethod: "bill",
   mainObjective: "Reduce Electricity Bills",
   roofArea: "200",

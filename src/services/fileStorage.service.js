@@ -36,6 +36,46 @@ export function getUploadsRoot() {
 export async function ensureUploadDirs() {
   await fs.mkdir(path.join(UPLOADS_ROOT, "expert-reviews"), { recursive: true });
   await fs.mkdir(path.join(UPLOADS_ROOT, "quote-uploads"), { recursive: true });
+  await fs.mkdir(path.join(UPLOADS_ROOT, BLOG_IMAGES_FOLDER), { recursive: true });
+}
+
+export const BLOG_IMAGES_FOLDER = "blog-images";
+
+const BLOG_IMAGE_TYPES = new Map([
+  ["image/jpeg", ".jpg"],
+  ["image/png", ".png"],
+  ["image/webp", ".webp"],
+  ["image/gif", ".gif"],
+]);
+
+export function getBlogImagesDir() {
+  return path.join(UPLOADS_ROOT, BLOG_IMAGES_FOLDER);
+}
+
+/**
+ * Persist a public blog image under uploads/blog-images/.
+ * Only raster image types are accepted because these files are served publicly.
+ */
+export async function saveBlogImage(file) {
+  if (!file?.buffer?.length) {
+    throw new Error("No file uploaded");
+  }
+  const mimeType = String(file.mimetype || "").toLowerCase();
+  const ext = BLOG_IMAGE_TYPES.get(mimeType);
+  if (!ext) {
+    throw new Error("Unsupported image type. Allowed: JPG, PNG, WebP, GIF.");
+  }
+
+  await fs.mkdir(getBlogImagesDir(), { recursive: true });
+  const storedName = `${randomUUID()}${ext}`;
+  await fs.writeFile(path.join(getBlogImagesDir(), storedName), file.buffer);
+
+  return {
+    storedName,
+    mimeType,
+    sizeBytes: file.size ?? file.buffer.length,
+    storagePath: `${BLOG_IMAGES_FOLDER}/${storedName}`,
+  };
 }
 
 function sanitizeOriginalName(name) {

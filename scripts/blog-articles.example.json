@@ -1,0 +1,21 @@
+[
+  {
+    "title": "How to Size a Solar System for Your Home",
+    "excerpt": "A practical, step-by-step guide to estimating the right solar array and battery size before you talk to installers.",
+    "contentHtml": "<p>Choosing the right system starts with understanding how much energy you actually use.</p><h2>Review your bills</h2><p>Add up your monthly kWh for the last 12 months.</p><h2>List critical appliances</h2><ul><li>Fridge</li><li>Lighting</li><li>Fans and TV</li></ul>",
+    "featuredImage": "images/solar-sizing.jpg",
+    "featuredImageAlt": "Solar panels on a rooftop at sunset",
+    "category": "Guides",
+    "tags": ["solar sizing", "homeowners"],
+    "metaTitle": "How to Size a Solar System for Your Home | SolarVy",
+    "metaDescription": "Learn how to estimate the right solar array and battery size for your home in four simple steps before speaking to installers."
+  },
+  {
+    "title": "Batteries vs Diesel Generators: What Really Saves Money",
+    "content": "Diesel generators are cheap to buy but expensive to run.\n\nBattery storage costs more upfront but pays back through lower fuel and maintenance costs.",
+    "featuredImagePath": "https://api.solarvy.net/api/uploads/blog-images/example.jpg",
+    "featuredImageAlt": "Battery storage cabinet next to a diesel generator",
+    "category": "Savings",
+    "tags": "batteries, diesel, savings"
+  }
+]

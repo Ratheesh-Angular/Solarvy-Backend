@@ -130,6 +130,8 @@ function buildComInputsPayload(formData) {
     propertyType: formData.propertyType || null,
     template: formData.template || null,
     powerSetup: formData.powerSetup || null,
+    gridUnavailableBand: formData.gridUnavailableBand || null,
+    monthlyGeneratorFuelSpend: toNumber(formData.monthlyGeneratorFuelSpend),
     mainObjective: formData.mainObjective || null,
     inputMethod: methodLabel || null,
     roofArea: toNumber(formData.roofArea),
@@ -556,6 +558,25 @@ function writeInputs(workbook, formData) {
   setCell(userInputs, USER_INPUT_CELLS.propertyType, formData.propertyType);
   setCell(userInputs, USER_INPUT_CELLS.template, formData.template);
   setCell(userInputs, USER_INPUT_CELLS.powerSetup, formData.powerSetup);
+  if (formData.gridUnavailableBand) {
+    setCell(
+      userInputs,
+      USER_INPUT_CELLS.gridUnavailableBand,
+      formData.gridUnavailableBand,
+    );
+  }
+  if (
+    formData.powerSetup === "Grid + Generator" &&
+    formData.monthlyGeneratorFuelSpend !== undefined &&
+    formData.monthlyGeneratorFuelSpend !== null &&
+    String(formData.monthlyGeneratorFuelSpend).trim() !== ""
+  ) {
+    setCell(
+      userInputs,
+      USER_INPUT_CELLS.monthlyGeneratorFuelSpend,
+      toNumber(formData.monthlyGeneratorFuelSpend),
+    );
+  }
   setCell(userInputs, USER_INPUT_CELLS.mainObjective, formData.mainObjective);
 
   const methodLabel = INPUT_METHOD_LABELS[formData.inputMethod];
