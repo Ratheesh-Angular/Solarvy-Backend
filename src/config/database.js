@@ -224,6 +224,37 @@ async function initSchema(db) {
       user_agent TEXT NOT NULL DEFAULT '',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS financing_enquiries (
+      id SERIAL PRIMARY KEY,
+      reference VARCHAR(40) UNIQUE NOT NULL,
+      visitor_id UUID REFERENCES visitors(id) ON DELETE SET NULL,
+      session_id UUID REFERENCES visitor_sessions(id) ON DELETE SET NULL,
+      assessment_id INTEGER REFERENCES assessments(id) ON DELETE SET NULL,
+      applicant_type VARCHAR(120) NOT NULL DEFAULT '',
+      amount_to_finance NUMERIC(16, 2) NOT NULL,
+      deposit_available NUMERIC(16, 2) NULL,
+      repayment_period VARCHAR(40) NOT NULL DEFAULT '',
+      repayment_label VARCHAR(80) NOT NULL DEFAULT '',
+      income_range VARCHAR(80) NOT NULL DEFAULT '',
+      location VARCHAR(120) NOT NULL DEFAULT '',
+      notes TEXT NOT NULL DEFAULT '',
+      route_id VARCHAR(80) NOT NULL DEFAULT '',
+      route_label VARCHAR(160) NOT NULL DEFAULT '',
+      partner_id VARCHAR(120) NOT NULL DEFAULT '',
+      partner_name VARCHAR(255) NOT NULL DEFAULT '',
+      partner_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+      shared_items JSONB NOT NULL DEFAULT '[]'::jsonb,
+      project_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+      consent_share BOOLEAN NOT NULL DEFAULT FALSE,
+      confirm_accurate BOOLEAN NOT NULL DEFAULT FALSE,
+      confirm_terms BOOLEAN NOT NULL DEFAULT FALSE,
+      status VARCHAR(30) NOT NULL DEFAULT 'new',
+      admin_notes TEXT NOT NULL DEFAULT '',
+      status_updated_at TIMESTAMPTZ NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
   `);
 
   await ensureColumn(db, "assessment_drafts", "visitor_id", "UUID NULL");
@@ -315,6 +346,8 @@ async function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_blog_views_blog_created ON blog_views (blog_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_blog_views_blog_visitor ON blog_views (blog_id, visitor_key, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_blog_views_created ON blog_views (created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_financing_enquiries_visitor ON financing_enquiries (visitor_id);
+    CREATE INDEX IF NOT EXISTS idx_financing_enquiries_created ON financing_enquiries (created_at DESC);
   `);
 }
 

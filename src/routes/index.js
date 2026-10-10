@@ -11,6 +11,7 @@ import quoteUploadRoutes from "./quoteUpload.routes.js";
 import chatRoutes from "./chat.routes.js";
 import blogRoutes from "./blog.routes.js";
 import adminBlogRoutes from "./adminBlog.routes.js";
+import financingEnquiryRoutes from "./financingEnquiry.routes.js";
 
 const router = Router();
 
@@ -19,6 +20,7 @@ router.use("/tracking", trackingRoutes);
 router.use("/request-intro", requestIntroRoutes);
 router.use("/expert-review", expertReviewRoutes);
 router.use("/quote-uploads", quoteUploadRoutes);
+router.use("/financing-enquiries", financingEnquiryRoutes);
 router.use("/assessments", assessmentRoutes);
 router.use("/excel", excelRoutes);
 router.use("/bills", billsRoutes);

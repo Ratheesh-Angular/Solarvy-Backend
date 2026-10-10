@@ -45,8 +45,14 @@ import {
   listRequestIntros,
   listExpertReviews,
   listQuoteUploads,
+  listFinancingEnquiries,
   getExpertReviewById,
 } from "../repositories/adminAnalytics.repository.js";
+import {
+  FINANCING_STATUSES,
+  getFinancingEnquiryById,
+  updateFinancingEnquiryReview,
+} from "../repositories/financingEnquiry.repository.js";
 import { getQuoteUploadById } from "../repositories/quoteUpload.repository.js";
 import { resolveStoredPath } from "../services/fileStorage.service.js";
 import {
@@ -94,6 +100,49 @@ function mapAssessmentRow(row) {
     updatedAt: row.updated_at,
   };
 }
+
+function numberOrNull(value) {
+  if (value === null || value === undefined) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function mapFinancingRow(row) {
+  return {
+    id: row.id,
+    reference: row.reference,
+    visitorId: row.visitor_id,
+    sessionId: row.session_id,
+    assessmentId: row.assessment_id,
+    assessmentRef:
+      row.assessment_id != null ? formatAssessmentId(row.assessment_id) : null,
+    applicantType: row.applicant_type,
+    amountToFinance: numberOrNull(row.amount_to_finance),
+    depositAvailable: numberOrNull(row.deposit_available),
+    repaymentPeriod: row.repayment_period,
+    repaymentLabel: row.repayment_label,
+    incomeRange: row.income_range,
+    location: row.location,
+    notes: row.notes,
+    routeId: row.route_id,
+    routeLabel: row.route_label,
+    partnerId: row.partner_id,
+    partnerName: row.partner_name,
+    partnerSnapshot: row.partner_snapshot || {},
+    sharedItems: Array.isArray(row.shared_items) ? row.shared_items : [],
+    projectSnapshot: row.project_snapshot || {},
+    consentShare: row.consent_share,
+    confirmAccurate: row.confirm_accurate,
+    confirmTerms: row.confirm_terms,
+    status: row.status,
+    adminNotes: row.admin_notes,
+    statusUpdatedAt: row.status_updated_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+const FINANCING_NOTES_MAX_LEN = 5_000;
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -297,6 +346,96 @@ router.get("/quote-uploads", requireAdmin, async (req, res, next) => {
     next(error);
   }
 });
+
+router.get("/financing-enquiries", requireAdmin, async (req, res, next) => {
+  try {
+    const data = await listFinancingEnquiries(req.query);
+    res.json({
+      success: true,
+      data: { ...data, items: data.items.map(mapFinancingRow) },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+async function loadFinancingForAdmin(req, res) {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) {
+    res.status(400).json({ success: false, message: "Invalid financing id" });
+    return null;
+  }
+
+  const row = await getFinancingEnquiryById(id);
+  const visitorId = String(req.query.visitorId || "").trim();
+  if (
+    !row ||
+    (visitorId && (!isUuid(visitorId) || row.visitor_id !== visitorId))
+  ) {
+    res
+      .status(404)
+      .json({ success: false, message: "Financing enquiry not found" });
+    return null;
+  }
+  return row;
+}
+
+router.get("/financing-enquiries/:id", requireAdmin, async (req, res, next) => {
+  try {
+    const row = await loadFinancingForAdmin(req, res);
+    if (!row) return;
+    res.json({ success: true, data: mapFinancingRow(row) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.patch(
+  "/financing-enquiries/:id",
+  requireAdmin,
+  async (req, res, next) => {
+    try {
+      const row = await loadFinancingForAdmin(req, res);
+      if (!row) return;
+
+      const { status, adminNotes } = req.body ?? {};
+
+      if (status !== undefined && !FINANCING_STATUSES.includes(status)) {
+        res.status(400).json({ success: false, message: "Invalid status" });
+        return;
+      }
+
+      if (adminNotes !== undefined) {
+        if (typeof adminNotes !== "string") {
+          res
+            .status(400)
+            .json({ success: false, message: "Notes must be text" });
+          return;
+        }
+        if (adminNotes.length > FINANCING_NOTES_MAX_LEN) {
+          res.status(400).json({
+            success: false,
+            message: `Notes must be at most ${FINANCING_NOTES_MAX_LEN} characters`,
+          });
+          return;
+        }
+      }
+
+      const updated = await updateFinancingEnquiryReview(row.id, {
+        status,
+        adminNotes: adminNotes === undefined ? undefined : adminNotes.trim(),
+      });
+
+      res.json({
+        success: true,
+        message: "Financing enquiry updated",
+        data: mapFinancingRow(updated),
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
 
 router.get(
   "/expert-reviews/:id/file",

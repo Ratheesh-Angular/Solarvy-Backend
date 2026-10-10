@@ -348,6 +348,12 @@ export async function listQuoteUploads(query = {}) {
   });
 }
 
+export async function listFinancingEnquiries(query = {}) {
+  return listLeadTable("financing_enquiries", query, {
+    searchColumns: ["reference", "partner_name", "location", "visitor_id::text"],
+  });
+}
+
 async function listLeadTable(table, query = {}, options = {}) {
   const { page, limit, offset } = pagination(query);
   const fromIso = parseDateBound(query.from);
