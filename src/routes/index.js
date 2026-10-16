@@ -12,11 +12,13 @@ import chatRoutes from "./chat.routes.js";
 import blogRoutes from "./blog.routes.js";
 import adminBlogRoutes from "./adminBlog.routes.js";
 import financingEnquiryRoutes from "./financingEnquiry.routes.js";
+import contactRoutes from "./contact.routes.js";
 
 const router = Router();
 
 router.use("/health", healthRoutes);
 router.use("/tracking", trackingRoutes);
+router.use("/contact", contactRoutes);
 router.use("/request-intro", requestIntroRoutes);
 router.use("/expert-review", expertReviewRoutes);
 router.use("/quote-uploads", quoteUploadRoutes);

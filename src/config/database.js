@@ -57,6 +57,19 @@ async function initSchema(db) {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS contact_messages (
+      id SERIAL PRIMARY KEY,
+      full_name VARCHAR(255) NOT NULL,
+      phone_number VARCHAR(50) NOT NULL,
+      email VARCHAR(255) NOT NULL,
+      project_timeline VARCHAR(100) DEFAULT '',
+      additional_notes TEXT DEFAULT '',
+      visitor_id UUID NULL,
+      session_id UUID NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS expert_reviews (
       id SERIAL PRIMARY KEY,
       full_name VARCHAR(255) NOT NULL,
@@ -334,6 +347,9 @@ async function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_request_intros_visitor ON request_intros (visitor_id);
     CREATE INDEX IF NOT EXISTS idx_request_intros_email ON request_intros (email);
     CREATE INDEX IF NOT EXISTS idx_request_intros_created ON request_intros (created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_contact_messages_visitor ON contact_messages (visitor_id);
+    CREATE INDEX IF NOT EXISTS idx_contact_messages_email ON contact_messages (email);
+    CREATE INDEX IF NOT EXISTS idx_contact_messages_created ON contact_messages (created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_expert_reviews_visitor ON expert_reviews (visitor_id);
     CREATE INDEX IF NOT EXISTS idx_expert_reviews_email ON expert_reviews (email);
     CREATE INDEX IF NOT EXISTS idx_expert_reviews_created ON expert_reviews (created_at DESC);

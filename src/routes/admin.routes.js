@@ -43,6 +43,7 @@ import {
   getVisitorDetail,
   listAssessments,
   listRequestIntros,
+  listContactMessages,
   listExpertReviews,
   listQuoteUploads,
   listFinancingEnquiries,
@@ -323,6 +324,15 @@ router.get("/assessments/:id", requireAdmin, async (req, res, next) => {
 router.get("/request-intros", requireAdmin, async (req, res, next) => {
   try {
     const data = await listRequestIntros(req.query);
+    res.json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/contact-messages", requireAdmin, async (req, res, next) => {
+  try {
+    const data = await listContactMessages(req.query);
     res.json({ success: true, data });
   } catch (error) {
     next(error);

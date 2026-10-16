@@ -9,6 +9,7 @@ const ALLOWED_EVENT_TYPES = new Set([
   "request_intro_submitted",
   "expert_review_submitted",
   "quote_upload_submitted",
+  "contact_submitted",
   "results_viewed",
   "pdf_download",
   "matched_installers_viewed",

@@ -27,6 +27,10 @@ export function validateRequestIntro(req, res, next) {
   next();
 }
 
+export function validateContact(req, res, next) {
+  validateRequestIntro(req, res, next);
+}
+
 export function validateExpertReview(req, res, next) {
   const { fullName, phoneNumber, email, projectLocation } = req.body;
 

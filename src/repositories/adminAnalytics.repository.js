@@ -338,6 +338,10 @@ export async function listRequestIntros(query = {}) {
   return listLeadTable("request_intros", query);
 }
 
+export async function listContactMessages(query = {}) {
+  return listLeadTable("contact_messages", query);
+}
+
 export async function listExpertReviews(query = {}) {
   return listLeadTable("expert_reviews", query);
 }
