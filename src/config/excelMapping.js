@@ -44,6 +44,52 @@ export const SHEETS = {
   strategyComparison: "Strategy_Comparison",
   pdfInputs: "PDF Inputs",
   installerResultsOutput: "Installer_Results_Output",
+  financeRequest: "Finance_Request",
+  financeMatches: "Finance_Matches",
+};
+
+/**
+ * Finance_Request writable cells (B4–B7 / B9 / B10 / B17 are formulas — do not write).
+ */
+export const FINANCE_REQUEST_CELLS = {
+  depositAvailable: "B8",
+  preferredRoute: "B11",
+  repaymentTerm: "B12",
+  applicantType: "B13",
+  location: "B14",
+  incomeRange: "B15",
+  consent: "B16",
+};
+
+/** Finance_Request formula cells read after recalc. */
+export const FINANCE_REQUEST_READ_CELLS = {
+  amountRequested: "B9",
+  requestValid: "B17",
+};
+
+/**
+ * Finance_Matches table (headers at row 1, products from row 2).
+ */
+export const FINANCE_MATCHES_TABLE = {
+  sheet: SHEETS.financeMatches,
+  startRow: 2,
+  endRow: 20,
+  columns: {
+    productId: "A",
+    provider: "B",
+    financingType: "C",
+    amountOk: "D",
+    depositOk: "E",
+    termOk: "F",
+    applicantOk: "G",
+    stateOk: "H",
+    routeOk: "I",
+    matchResult: "J",
+    monthlyRepayment: "K",
+    totalRepayment: "L",
+    upfrontFee: "M",
+    conditions: "N",
+  },
 };
 
 /**
@@ -200,6 +246,16 @@ export const DROPDOWN_FALLBACKS = {
     "13-18 hours",
     "19-24 hours",
   ],
+  financeRoutes: [
+    "Any",
+    "Asset financing",
+    "Solar instalment plan",
+    "Energy-as-a-Service / lease",
+  ],
+  financeRepaymentTerms: ["12-24 months", "24-36 months", "36+ months"],
+  financeApplicantTypes: ["Individual / Homeowner", "SME", "Corporate"],
+  financeIncomeRanges: ["Below 500k", "500k-1m", "1m-5m", "Above 5m"],
+  financeConsentOptions: ["Yes", "No"],
 };
 
 export const STATE_RANGE = "I4:I40";

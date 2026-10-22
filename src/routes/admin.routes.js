@@ -51,6 +51,7 @@ import {
 } from "../repositories/adminAnalytics.repository.js";
 import {
   FINANCING_STATUSES,
+  normalizeFinancingStatus,
   getFinancingEnquiryById,
   updateFinancingEnquiryReview,
 } from "../repositories/financingEnquiry.repository.js";
@@ -135,7 +136,7 @@ function mapFinancingRow(row) {
     consentShare: row.consent_share,
     confirmAccurate: row.confirm_accurate,
     confirmTerms: row.confirm_terms,
-    status: row.status,
+    status: normalizeFinancingStatus(row.status),
     adminNotes: row.admin_notes,
     statusUpdatedAt: row.status_updated_at,
     createdAt: row.created_at,
@@ -410,9 +411,18 @@ router.patch(
 
       const { status, adminNotes } = req.body ?? {};
 
-      if (status !== undefined && !FINANCING_STATUSES.includes(status)) {
-        res.status(400).json({ success: false, message: "Invalid status" });
-        return;
+      let nextStatus = status;
+      if (status !== undefined) {
+        const allowed =
+          FINANCING_STATUSES.includes(status) ||
+          status === "new" ||
+          status === "in_review" ||
+          status === "sent_to_partner";
+        if (!allowed) {
+          res.status(400).json({ success: false, message: "Invalid status" });
+          return;
+        }
+        nextStatus = normalizeFinancingStatus(status);
       }
 
       if (adminNotes !== undefined) {
@@ -432,7 +442,7 @@ router.patch(
       }
 
       const updated = await updateFinancingEnquiryReview(row.id, {
-        status,
+        status: nextStatus,
         adminNotes: adminNotes === undefined ? undefined : adminNotes.trim(),
       });
 

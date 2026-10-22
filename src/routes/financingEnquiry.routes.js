@@ -1,5 +1,9 @@
 import { Router } from "express";
-import { createFinancingEnquiry } from "../repositories/financingEnquiry.repository.js";
+import {
+  createFinancingEnquiry,
+  getFinancingEnquiryByReference,
+  normalizeFinancingStatus,
+} from "../repositories/financingEnquiry.repository.js";
 import { getAssessmentById } from "../repositories/assessment.repository.js";
 import { createActivityEvent } from "../repositories/activity.repository.js";
 import { validateFinancingEnquiry } from "../middleware/validate.js";
@@ -119,6 +123,41 @@ router.post("/", validateFinancingEnquiry, async (req, res, next) => {
         id: submission.id,
         reference: submission.reference,
         submittedAt: submission.created_at,
+        status: "enquiry_submitted",
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** Public status lookup by reference (e.g. SV-FIN-96655). */
+router.get("/by-reference/:reference", async (req, res, next) => {
+  try {
+    const reference = String(req.params.reference || "").trim();
+    if (!reference) {
+      res.status(400).json({ success: false, message: "Reference is required" });
+      return;
+    }
+
+    const row = await getFinancingEnquiryByReference(reference);
+    if (!row) {
+      res.status(404).json({ success: false, message: "Enquiry not found" });
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        id: row.id,
+        reference: row.reference,
+        status: normalizeFinancingStatus(row.status),
+        partnerName: row.partner_name,
+        partnerId: row.partner_id,
+        routeId: row.route_id,
+        routeLabel: row.route_label,
+        submittedAt: row.created_at,
+        statusUpdatedAt: row.status_updated_at,
       },
     });
   } catch (error) {

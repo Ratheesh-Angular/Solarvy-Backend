@@ -2,12 +2,28 @@ import { randomInt } from "crypto";
 import { getPool } from "../config/database.js";
 import { isUuid } from "../utils/requestMeta.js";
 
+/** Tracker-aligned statuses (admin + user Financing Status page). */
 export const FINANCING_STATUSES = [
-  "new",
-  "in_review",
-  "sent_to_partner",
+  "enquiry_submitted",
+  "provider_review",
+  "additional_information",
+  "offer_decision",
+  "customer_decision",
   "closed",
 ];
+
+const LEGACY_STATUS_MAP = {
+  new: "enquiry_submitted",
+  in_review: "provider_review",
+  sent_to_partner: "offer_decision",
+};
+
+export function normalizeFinancingStatus(status) {
+  const raw = String(status || "").trim();
+  if (LEGACY_STATUS_MAP[raw]) return LEGACY_STATUS_MAP[raw];
+  if (FINANCING_STATUSES.includes(raw)) return raw;
+  return "enquiry_submitted";
+}
 
 const MAX_REFERENCE_ATTEMPTS = 5;
 
@@ -76,6 +92,16 @@ export async function getFinancingEnquiryById(id) {
   const result = await getPool().query(
     `SELECT * FROM financing_enquiries WHERE id = $1`,
     [id],
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function getFinancingEnquiryByReference(reference) {
+  const ref = String(reference || "").trim();
+  if (!ref) return null;
+  const result = await getPool().query(
+    `SELECT * FROM financing_enquiries WHERE reference = $1`,
+    [ref],
   );
   return result.rows[0] ?? null;
 }

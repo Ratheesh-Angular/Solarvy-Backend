@@ -262,12 +262,30 @@ async function initSchema(db) {
       consent_share BOOLEAN NOT NULL DEFAULT FALSE,
       confirm_accurate BOOLEAN NOT NULL DEFAULT FALSE,
       confirm_terms BOOLEAN NOT NULL DEFAULT FALSE,
-      status VARCHAR(30) NOT NULL DEFAULT 'new',
+      status VARCHAR(40) NOT NULL DEFAULT 'enquiry_submitted',
       admin_notes TEXT NOT NULL DEFAULT '',
       status_updated_at TIMESTAMPTZ NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+  `);
+
+  // Migrate legacy financing statuses → tracker-aligned values.
+  await db.query(`
+    UPDATE financing_enquiries SET status = 'enquiry_submitted'
+    WHERE status = 'new'
+  `);
+  await db.query(`
+    UPDATE financing_enquiries SET status = 'provider_review'
+    WHERE status = 'in_review'
+  `);
+  await db.query(`
+    UPDATE financing_enquiries SET status = 'offer_decision'
+    WHERE status = 'sent_to_partner'
+  `);
+  await db.query(`
+    ALTER TABLE financing_enquiries
+      ALTER COLUMN status SET DEFAULT 'enquiry_submitted'
   `);
 
   await ensureColumn(db, "assessment_drafts", "visitor_id", "UUID NULL");

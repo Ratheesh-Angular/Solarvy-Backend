@@ -129,6 +129,7 @@ async function loadCatalogs() {
   const userInputs = workbook.getWorksheet(SHEETS.userInputs);
   const equipmentDefault = workbook.getWorksheet(SHEETS.equipmentDefault);
   const categoryMenu = workbook.getWorksheet(SHEETS.categoryMenu);
+  const financeRequest = workbook.getWorksheet(SHEETS.financeRequest);
 
   const propertyTypes =
     parseValidationList(userInputs, "B10") || DROPDOWN_FALLBACKS.propertyTypes;
@@ -222,6 +223,22 @@ async function loadCatalogs() {
     String(cellValue(userInputs.getCell("A11")) ?? "Templates").trim() ||
     "Templates";
 
+  const financeRoutes =
+    (financeRequest && parseValidationList(financeRequest, "B11")) ||
+    DROPDOWN_FALLBACKS.financeRoutes;
+  const financeRepaymentTerms =
+    (financeRequest && parseValidationList(financeRequest, "B12")) ||
+    DROPDOWN_FALLBACKS.financeRepaymentTerms;
+  const financeApplicantTypes =
+    (financeRequest && parseValidationList(financeRequest, "B13")) ||
+    DROPDOWN_FALLBACKS.financeApplicantTypes;
+  const financeIncomeRanges =
+    (financeRequest && parseValidationList(financeRequest, "B15")) ||
+    DROPDOWN_FALLBACKS.financeIncomeRanges;
+  const financeConsentOptions =
+    (financeRequest && parseValidationList(financeRequest, "B16")) ||
+    DROPDOWN_FALLBACKS.financeConsentOptions;
+
   return {
     propertyTypes,
     templatesByProperty,
@@ -237,6 +254,11 @@ async function loadCatalogs() {
     gridUnavailableQuestion,
     monthlyGeneratorFuelLabel,
     equipmentCatalog,
+    financeRoutes,
+    financeRepaymentTerms,
+    financeApplicantTypes,
+    financeIncomeRanges,
+    financeConsentOptions,
   };
 }
 

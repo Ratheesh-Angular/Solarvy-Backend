@@ -202,6 +202,26 @@ try {
         $cust.Range("E$r").Value2 = $null
       }
     }
+
+    if ($null -ne $inputs.finance) {
+      try {
+        $fin = $wb.Worksheets.Item("Finance_Request")
+        $f = $inputs.finance
+        if ($null -ne $f.depositAvailable -and "$($f.depositAvailable)" -ne "") {
+          $fin.Range("B8").Value2 = [double]$f.depositAvailable
+          Write-Output "COM_SET Finance_Request!B8=$($fin.Range('B8').Value2)"
+        }
+        Set-CellValue $fin "B11" $f.preferredRoute
+        Set-CellValue $fin "B12" $f.repaymentTerm
+        Set-CellValue $fin "B13" $f.applicantType
+        Set-CellValue $fin "B14" $f.location
+        Set-CellValue $fin "B15" $f.incomeRange
+        Set-CellValue $fin "B16" $f.consent
+        Write-Output "COM_SET Finance_Request route=$($fin.Range('B11').Value2) applicant=$($fin.Range('B13').Value2)"
+      } catch {
+        Write-Output "COM_SET Finance_Request FAILED: $_"
+      }
+    }
   } else {
     # Fallback: retouch existing User_Inputs / Bill values
     try {
@@ -253,6 +273,22 @@ try {
       "B31",
       "B34", "B35", "B36", "B40", "B41", "B46"
     )
+  } catch { }
+
+  try {
+    Materialize-RangeValues $wb.Worksheets.Item("Finance_Request") @(
+      "B4", "B5", "B6", "B7", "B8", "B9", "B10", "B11", "B12", "B13", "B14", "B15", "B16", "B17"
+    )
+  } catch { }
+
+  try {
+    $fmAddrs = @()
+    for ($r = 2; $r -le 20; $r++) {
+      foreach ($col in @("A","B","C","D","E","F","G","H","I","J","K","L","M","N")) {
+        $fmAddrs += ($col + $r)
+      }
+    }
+    Materialize-RangeValues $wb.Worksheets.Item("Finance_Matches") $fmAddrs
   } catch { }
 
   try {

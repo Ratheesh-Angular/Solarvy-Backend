@@ -23,6 +23,9 @@ import {
   STRATEGY_COMPARISON,
   PDF_INPUTS_COST_COMPARISON,
   INSTALLER_RESULTS_TABLE,
+  FINANCE_REQUEST_CELLS,
+  FINANCE_REQUEST_READ_CELLS,
+  FINANCE_MATCHES_TABLE,
 } from "../config/excelMapping.js";
 import { cellValue } from "./excelReader.service.js";
 
@@ -208,6 +211,19 @@ function buildComInputsPayload(formData) {
         };
       })
       .filter(Boolean);
+  }
+
+  const finance = formData.finance;
+  if (finance && typeof finance === "object") {
+    payload.finance = {
+      depositAvailable: toNumber(finance.depositAvailable),
+      preferredRoute: finance.preferredRoute || null,
+      repaymentTerm: finance.repaymentTerm || null,
+      applicantType: finance.applicantType || null,
+      location: finance.location || null,
+      incomeRange: finance.incomeRange || null,
+      consent: finance.consent || null,
+    };
   }
 
   return payload;
@@ -617,6 +633,39 @@ function writeInputs(workbook, formData) {
       hours: Number(row.hours) || 0,
     }));
   }
+
+  writeFinanceInputs(workbook, formData.finance);
+}
+
+/** Write Finance_Request user cells only — never B4–B7 / B9 / B10 / B17 formulas. */
+function writeFinanceInputs(workbook, finance) {
+  if (!finance || typeof finance !== "object") return;
+
+  const sheet = workbook.getWorksheet(SHEETS.financeRequest);
+  if (!sheet) return;
+
+  const deposit = toNumber(finance.depositAvailable);
+  if (deposit !== null) {
+    setCell(sheet, FINANCE_REQUEST_CELLS.depositAvailable, deposit);
+  }
+  if (finance.preferredRoute) {
+    setCell(sheet, FINANCE_REQUEST_CELLS.preferredRoute, finance.preferredRoute);
+  }
+  if (finance.repaymentTerm) {
+    setCell(sheet, FINANCE_REQUEST_CELLS.repaymentTerm, finance.repaymentTerm);
+  }
+  if (finance.applicantType) {
+    setCell(sheet, FINANCE_REQUEST_CELLS.applicantType, finance.applicantType);
+  }
+  if (finance.location) {
+    setCell(sheet, FINANCE_REQUEST_CELLS.location, finance.location);
+  }
+  if (finance.incomeRange) {
+    setCell(sheet, FINANCE_REQUEST_CELLS.incomeRange, finance.incomeRange);
+  }
+  if (finance.consent) {
+    setCell(sheet, FINANCE_REQUEST_CELLS.consent, finance.consent);
+  }
 }
 
 /** Input columns only — never touch formula columns like G (dailyKwh). */
@@ -884,6 +933,22 @@ function readOutputs(workbook) {
   // Installer_Results_Output — matched installer cards (A16:K…)
   results.installerMatches = readInstallerMatches(workbook);
 
+  // Finance_Request + Finance_Matches (when sheets present)
+  const financeRequestSheet = workbook.getWorksheet(SHEETS.financeRequest);
+  if (financeRequestSheet) {
+    results.financeAmountRequested = asNullableNumber(
+      cellValue(
+        financeRequestSheet.getCell(FINANCE_REQUEST_READ_CELLS.amountRequested),
+      ),
+    );
+    results.financeRequestValid = asNullableString(
+      cellValue(
+        financeRequestSheet.getCell(FINANCE_REQUEST_READ_CELLS.requestValid),
+      ),
+    );
+  }
+  results.financeMatches = readFinanceMatches(workbook);
+
   return results;
 }
 
@@ -960,6 +1025,93 @@ function readInstallerMatches(workbook) {
   }
 
   return rows;
+}
+
+function parseConditionsList(raw) {
+  const text = asNullableString(raw);
+  if (!text) return [];
+  return text
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function readFinanceMatches(workbook) {
+  const sheet = workbook.getWorksheet(FINANCE_MATCHES_TABLE.sheet);
+  if (!sheet) return [];
+
+  const { startRow, endRow, columns: cols } = FINANCE_MATCHES_TABLE;
+  const rows = [];
+
+  for (let r = startRow; r <= endRow; r++) {
+    const productId = asNullableString(
+      cellValue(sheet.getCell(`${cols.productId}${r}`)),
+    );
+    const provider = asNullableString(
+      cellValue(sheet.getCell(`${cols.provider}${r}`)),
+    );
+    if (!productId && !provider) continue;
+
+    rows.push({
+      productId,
+      provider,
+      financingType: asNullableString(
+        cellValue(sheet.getCell(`${cols.financingType}${r}`)),
+      ),
+      amountOk: asNullableString(
+        cellValue(sheet.getCell(`${cols.amountOk}${r}`)),
+      ),
+      depositOk: asNullableString(
+        cellValue(sheet.getCell(`${cols.depositOk}${r}`)),
+      ),
+      termOk: asNullableString(cellValue(sheet.getCell(`${cols.termOk}${r}`))),
+      applicantOk: asNullableString(
+        cellValue(sheet.getCell(`${cols.applicantOk}${r}`)),
+      ),
+      stateOk: asNullableString(
+        cellValue(sheet.getCell(`${cols.stateOk}${r}`)),
+      ),
+      routeOk: asNullableString(
+        cellValue(sheet.getCell(`${cols.routeOk}${r}`)),
+      ),
+      matchResult: asNullableString(
+        cellValue(sheet.getCell(`${cols.matchResult}${r}`)),
+      ),
+      monthlyRepayment: asNullableNumber(
+        cellValue(sheet.getCell(`${cols.monthlyRepayment}${r}`)),
+      ),
+      totalRepayment: asNullableNumber(
+        cellValue(sheet.getCell(`${cols.totalRepayment}${r}`)),
+      ),
+      upfrontFee: asNullableNumber(
+        cellValue(sheet.getCell(`${cols.upfrontFee}${r}`)),
+      ),
+      conditions: asNullableString(
+        cellValue(sheet.getCell(`${cols.conditions}${r}`)),
+      ),
+      requirements: parseConditionsList(
+        cellValue(sheet.getCell(`${cols.conditions}${r}`)),
+      ),
+    });
+  }
+
+  return rows;
+}
+
+/**
+ * Filter Finance_Matches rows to preliminary matches for a preferred route.
+ * When preferredRoute is "Any" or empty, keep all preliminary matches.
+ */
+export function filterPreliminaryFinanceMatches(matches, preferredRoute) {
+  const route = String(preferredRoute || "").trim();
+  const list = Array.isArray(matches) ? matches : [];
+  return list.filter((row) => {
+    if (String(row.matchResult || "").trim().toUpperCase() !== "PRELIMINARY MATCH") {
+      return false;
+    }
+    if (!route || route.toLowerCase() === "any") return true;
+    return String(row.financingType || "").trim() === route;
+  });
 }
 
 /**
