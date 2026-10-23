@@ -18,7 +18,7 @@
  *
  * Articles whose slug already exists are skipped, so the script is safe to re-run.
  * Content goes through the same sanitizer as the admin editor. Nothing is published.
- * Set API_URL in .env so uploaded image URLs are public (e.g. https://api.solarvy.net).
+ * Set API_URL in .env so uploaded image URLs are public (e.g. https://api.solarvy.ng).
  */
 import "dotenv/config";
 import { readFile } from "node:fs/promises";

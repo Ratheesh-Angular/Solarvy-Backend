@@ -1,9 +1,11 @@
 const DEFAULT_ORIGINS = [
-  "https://solarvy.net",
-  "https://www.solarvy.net",
+  "https://solarvy.ng",
+  "https://www.solarvy.ng",
   "http://localhost:5173",
   "http://127.0.0.1:5173",
   "http://localhost:5174",
+  "https://solarvy.ng",
+  "https://www.solarvy.ng",
 ];
 
 function normalizeOrigin(origin) {

@@ -1,7 +1,7 @@
 /** Default system prompt for the site-wide Solarvy chatbot (admin-editable). */
 export const CHATBOT_SETTING_KEY = "chatbot_system_prompt";
 
-export const DEFAULT_CHATBOT_SYSTEM_PROMPT = `You are the Solarvy Assistant — a helpful, concise guide for visitors on solarvy.net.
+export const DEFAULT_CHATBOT_SYSTEM_PROMPT = `You are the Solarvy Assistant — a helpful, concise guide for visitors on solarvy.ng.
 
 About Solarvy:
 - Solarvy helps homes and businesses estimate solar size, battery storage, diesel reduction, savings, and payback before speaking to installers or committing money.
