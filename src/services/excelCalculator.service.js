@@ -1099,19 +1099,19 @@ function readFinanceMatches(workbook) {
 }
 
 /**
- * Filter Finance_Matches rows to preliminary matches for a preferred route.
- * When preferredRoute is "Any" or empty, keep all preliminary matches.
+ * Keep Finance_Matches rows Excel already marked as PRELIMINARY MATCH.
+ * Route / eligibility are decided in-sheet (Route OK + MATCH RESULT); do not
+ * re-filter by financingType here — that can drop valid matches when type
+ * cells fail to read after COM materialization.
+ * preferredRoute is accepted for call-site compatibility but unused.
  */
-export function filterPreliminaryFinanceMatches(matches, preferredRoute) {
-  const route = String(preferredRoute || "").trim();
+export function filterPreliminaryFinanceMatches(matches, _preferredRoute) {
   const list = Array.isArray(matches) ? matches : [];
-  return list.filter((row) => {
-    if (String(row.matchResult || "").trim().toUpperCase() !== "PRELIMINARY MATCH") {
-      return false;
-    }
-    if (!route || route.toLowerCase() === "any") return true;
-    return String(row.financingType || "").trim() === route;
-  });
+  return list.filter(
+    (row) =>
+      String(row.matchResult || "").trim().toUpperCase() ===
+      "PRELIMINARY MATCH",
+  );
 }
 
 /**

@@ -281,14 +281,12 @@ try {
     )
   } catch { }
 
+  # Snapshot the whole matches table in one range write so cell-by-cell
+  # Value2 assignment cannot collapse shared/spill formulas mid-pass.
   try {
-    $fmAddrs = @()
-    for ($r = 2; $r -le 20; $r++) {
-      foreach ($col in @("A","B","C","D","E","F","G","H","I","J","K","L","M","N")) {
-        $fmAddrs += ($col + $r)
-      }
-    }
-    Materialize-RangeValues $wb.Worksheets.Item("Finance_Matches") $fmAddrs
+    $fm = $wb.Worksheets.Item("Finance_Matches").Range("A2:N20")
+    $fmVals = $fm.Value2
+    if ($null -ne $fmVals) { $fm.Value2 = $fmVals }
   } catch { }
 
   try {
