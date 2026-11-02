@@ -3,6 +3,7 @@ import path from "node:path";
 import ExcelJS from "exceljs";
 import { getTemplatePath, SHEETS } from "../config/excelMapping.js";
 import { invalidateCatalogCache } from "./excelReader.service.js";
+import { invalidateFinanceLocationTokenCache } from "./excelCalculator.service.js";
 
 const MAX_TEMPLATE_BYTES = 25 * 1024 * 1024;
 const DEFAULT_DOWNLOAD_NAME = "solarvy-calculator.xlsx";
@@ -204,6 +205,7 @@ export async function replaceTemplate(buffer, originalName = "") {
 
   deleteBackupTemplates(targetDir);
   invalidateCatalogCache();
+  invalidateFinanceLocationTokenCache();
 
   return getTemplateInfo();
 }

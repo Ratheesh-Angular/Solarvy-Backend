@@ -220,7 +220,7 @@ function buildComInputsPayload(formData) {
       preferredRoute: finance.preferredRoute || null,
       repaymentTerm: finance.repaymentTerm || null,
       applicantType: finance.applicantType || null,
-      location: normalizeFinanceLocation(finance.location),
+      location: resolveFinanceLocationForExcel(finance.location),
       incomeRange: finance.incomeRange || null,
       consent: finance.consent || null,
     };
@@ -542,27 +542,117 @@ function toNumber(value) {
   return Number.isFinite(n) ? n : null;
 }
 
-/**
- * Map FCT / Abuja aliases to the finance UI canonical label so Excel State OK
- * SEARCH matches Finance_Products tokens (NIGERIA_STATE_LABELS).
- */
-function normalizeFinanceLocation(location) {
-  const trimmed = String(location || "").trim();
-  if (!trimmed) return null;
-  const key = trimmed
+/** Normalize state labels for comparison (FCT Abuja ≈ fctabuja). */
+function normalizeStateTokenKey(value) {
+  return String(value || "")
     .toLowerCase()
     .replace(/\bstate\b/g, "")
     .replace(/[^a-z]/g, "");
-  if (
-    key === "fct" ||
-    key === "abuja" ||
-    key === "fctabuja" ||
-    key === "federalcapitalterritory" ||
-    key === "federalcapitalterritoryfct" ||
-    key === "federalcapitalterritoryabuja"
-  ) {
-    return "Federal Capital Territory";
+}
+
+const FCT_FAMILY_KEYS = new Set([
+  "fct",
+  "abuja",
+  "fctabuja",
+  "federalcapitalterritory",
+  "federalcapitalterritoryfct",
+  "federalcapitalterritoryabuja",
+]);
+
+/** Preference when the uploaded sheet has multiple FCT-family tokens. */
+const FCT_FAMILY_PREFERENCE = [
+  "federalcapitalterritory",
+  "fctabuja",
+  "fct",
+  "abuja",
+];
+
+let financeLocationTokenCache = {
+  mtimeMs: 0,
+  tokens: /** @type {string[]} */ ([]),
+};
+
+/** Clear cached Finance_Products state tokens (call after admin template upload). */
+export function invalidateFinanceLocationTokenCache() {
+  financeLocationTokenCache = { mtimeMs: 0, tokens: [] };
+}
+
+/**
+ * Read-only: unique States served tokens from Finance_Products!F (skip All).
+ * Cached by template mtime so client uploads are picked up automatically.
+ */
+async function refreshFinanceLocationTokensIfNeeded() {
+  const templatePath = getTemplatePath();
+  if (!fs.existsSync(templatePath)) {
+    financeLocationTokenCache = { mtimeMs: 0, tokens: [] };
+    return financeLocationTokenCache.tokens;
   }
+
+  const mtimeMs = fs.statSync(templatePath).mtimeMs;
+  if (
+    financeLocationTokenCache.mtimeMs === mtimeMs &&
+    Array.isArray(financeLocationTokenCache.tokens)
+  ) {
+    return financeLocationTokenCache.tokens;
+  }
+
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(templatePath);
+  const sheet = workbook.getWorksheet("Finance_Products");
+  const tokens = [];
+  const seen = new Set();
+
+  if (sheet) {
+    sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+      if (rowNumber < 2) return;
+      const raw = cellValue(row.getCell(6)); // column F
+      if (raw === null || raw === undefined || raw === "") return;
+      String(raw)
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .forEach((token) => {
+          if (token.toLowerCase() === "all") return;
+          const key = normalizeStateTokenKey(token);
+          if (!key || seen.has(key)) return;
+          seen.add(key);
+          tokens.push(token);
+        });
+    });
+  }
+
+  financeLocationTokenCache = { mtimeMs, tokens };
+  return tokens;
+}
+
+/**
+ * Map UI finance location to a token that already exists in the uploaded
+ * Finance_Products States served list, so Excel State OK SEARCH can match.
+ * Does not modify the workbook — only chooses what we write to B14.
+ */
+function resolveFinanceLocationForExcel(location) {
+  const trimmed = String(location || "").trim();
+  if (!trimmed) return null;
+
+  const tokens = financeLocationTokenCache.tokens || [];
+  const needle = normalizeStateTokenKey(trimmed);
+
+  const exact = tokens.find((token) => normalizeStateTokenKey(token) === needle);
+  if (exact) return exact;
+
+  if (FCT_FAMILY_KEYS.has(needle)) {
+    for (const preferred of FCT_FAMILY_PREFERENCE) {
+      const hit = tokens.find(
+        (token) => normalizeStateTokenKey(token) === preferred,
+      );
+      if (hit) return hit;
+    }
+    const anyFct = tokens.find((token) =>
+      FCT_FAMILY_KEYS.has(normalizeStateTokenKey(token)),
+    );
+    if (anyFct) return anyFct;
+  }
+
   return trimmed;
 }
 
@@ -681,7 +771,7 @@ function writeFinanceInputs(workbook, finance) {
   if (finance.applicantType) {
     setCell(sheet, FINANCE_REQUEST_CELLS.applicantType, finance.applicantType);
   }
-  const location = normalizeFinanceLocation(finance.location);
+  const location = resolveFinanceLocationForExcel(finance.location);
   if (location) {
     setCell(sheet, FINANCE_REQUEST_CELLS.location, location);
   }
@@ -1654,6 +1744,8 @@ export async function calculateAssessment(formData) {
   if (!fs.existsSync(templatePath)) {
     throw new Error(`Excel template not found: ${templatePath}`);
   }
+
+  await refreshFinanceLocationTokensIfNeeded();
 
   const useComDirect = useComDirectWrites();
   excelDebugLog(
