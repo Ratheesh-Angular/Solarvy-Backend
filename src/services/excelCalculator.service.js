@@ -220,7 +220,7 @@ function buildComInputsPayload(formData) {
       preferredRoute: finance.preferredRoute || null,
       repaymentTerm: finance.repaymentTerm || null,
       applicantType: finance.applicantType || null,
-      location: finance.location || null,
+      location: normalizeFinanceLocation(finance.location),
       incomeRange: finance.incomeRange || null,
       consent: finance.consent || null,
     };
@@ -542,6 +542,30 @@ function toNumber(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * Map FCT / Abuja aliases to the finance UI canonical label so Excel State OK
+ * SEARCH matches Finance_Products tokens (NIGERIA_STATE_LABELS).
+ */
+function normalizeFinanceLocation(location) {
+  const trimmed = String(location || "").trim();
+  if (!trimmed) return null;
+  const key = trimmed
+    .toLowerCase()
+    .replace(/\bstate\b/g, "")
+    .replace(/[^a-z]/g, "");
+  if (
+    key === "fct" ||
+    key === "abuja" ||
+    key === "fctabuja" ||
+    key === "federalcapitalterritory" ||
+    key === "federalcapitalterritoryfct" ||
+    key === "federalcapitalterritoryabuja"
+  ) {
+    return "Federal Capital Territory";
+  }
+  return trimmed;
+}
+
 /** UI loadFactorPct 0–100 → Excel Appliance duty fraction (0–1). 0 stays 0. */
 function loadFactorFractionFromPct(loadFactorPct) {
   if (loadFactorPct === null || loadFactorPct === undefined || loadFactorPct === "") {
@@ -657,8 +681,9 @@ function writeFinanceInputs(workbook, finance) {
   if (finance.applicantType) {
     setCell(sheet, FINANCE_REQUEST_CELLS.applicantType, finance.applicantType);
   }
-  if (finance.location) {
-    setCell(sheet, FINANCE_REQUEST_CELLS.location, finance.location);
+  const location = normalizeFinanceLocation(finance.location);
+  if (location) {
+    setCell(sheet, FINANCE_REQUEST_CELLS.location, location);
   }
   if (finance.incomeRange) {
     setCell(sheet, FINANCE_REQUEST_CELLS.incomeRange, finance.incomeRange);
