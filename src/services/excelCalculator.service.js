@@ -220,7 +220,8 @@ function buildComInputsPayload(formData) {
       preferredRoute: finance.preferredRoute || null,
       repaymentTerm: finance.repaymentTerm || null,
       applicantType: finance.applicantType || null,
-      location: resolveFinanceLocationForExcel(finance.location),
+      // B14 location is Excel formula-driven — do not send/overwrite.
+      location: null,
       incomeRange: finance.incomeRange || null,
       consent: finance.consent || null,
     };
@@ -751,7 +752,11 @@ function writeInputs(workbook, formData) {
   writeFinanceInputs(workbook, formData.finance);
 }
 
-/** Write Finance_Request user cells only — never B4–B7 / B9 / B10 / B17 formulas. */
+/**
+ * Write Finance_Request user cells only.
+ * Never write B4–B7 / B9 / B10 / B17 (formulas), or B14 location
+ * (formula: Customer_Profile ← User_Inputs in client workbooks).
+ */
 function writeFinanceInputs(workbook, finance) {
   if (!finance || typeof finance !== "object") return;
 
@@ -770,10 +775,6 @@ function writeFinanceInputs(workbook, finance) {
   }
   if (finance.applicantType) {
     setCell(sheet, FINANCE_REQUEST_CELLS.applicantType, finance.applicantType);
-  }
-  const location = resolveFinanceLocationForExcel(finance.location);
-  if (location) {
-    setCell(sheet, FINANCE_REQUEST_CELLS.location, location);
   }
   if (finance.incomeRange) {
     setCell(sheet, FINANCE_REQUEST_CELLS.incomeRange, finance.incomeRange);

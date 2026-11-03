@@ -214,10 +214,11 @@ try {
         Set-CellValue $fin "B11" $f.preferredRoute
         Set-CellValue $fin "B12" $f.repaymentTerm
         Set-CellValue $fin "B13" $f.applicantType
-        Set-CellValue $fin "B14" $f.location
+        # Do not write B14 (location): client workbook uses formula
+        # Customer_Profile!B10 ← User_Inputs state/city.
         Set-CellValue $fin "B15" $f.incomeRange
         Set-CellValue $fin "B16" $f.consent
-        Write-Output "COM_SET Finance_Request route=$($fin.Range('B11').Value2) applicant=$($fin.Range('B13').Value2)"
+        Write-Output "COM_SET Finance_Request route=$($fin.Range('B11').Value2) applicant=$($fin.Range('B13').Value2) B14_left_as_formula"
       } catch {
         Write-Output "COM_SET Finance_Request FAILED: $_"
       }

@@ -49,13 +49,18 @@ export const SHEETS = {
 };
 
 /**
- * Finance_Request writable cells (B4–B7 / B9 / B10 / B17 are formulas — do not write).
+ * Finance_Request writable cells.
+ * Do not write: B4–B7 / B9 / B10 / B17 (formulas).
+ * Do not write B14 (location): in client workbooks this is formula-driven
+ * (Customer_Profile!B10 ← User_Inputs state/city). Overwriting it changes
+ * Finance_Matches results away from what Excel shows.
  */
 export const FINANCE_REQUEST_CELLS = {
   depositAvailable: "B8",
   preferredRoute: "B11",
   repaymentTerm: "B12",
   applicantType: "B13",
+  /** Formula-driven in v12+ — kept for reference; do not write. */
   location: "B14",
   incomeRange: "B15",
   consent: "B16",
