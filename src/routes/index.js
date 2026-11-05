@@ -13,10 +13,12 @@ import blogRoutes from "./blog.routes.js";
 import adminBlogRoutes from "./adminBlog.routes.js";
 import financingEnquiryRoutes from "./financingEnquiry.routes.js";
 import contactRoutes from "./contact.routes.js";
+import authRoutes from "./auth.routes.js";
 
 const router = Router();
 
 router.use("/health", healthRoutes);
+router.use("/auth", authRoutes);
 router.use("/tracking", trackingRoutes);
 router.use("/contact", contactRoutes);
 router.use("/request-intro", requestIntroRoutes);

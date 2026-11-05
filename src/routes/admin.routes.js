@@ -1,8 +1,18 @@
 import { Router } from "express";
 import multer from "multer";
 import path from "path";
-import { requireAdmin } from "../middleware/requireAdmin.js";
+import {
+  requireAdmin,
+  requireAdminPermission,
+  requireSuperAdmin,
+} from "../middleware/requireAdmin.js";
 import { loginAdmin } from "../services/adminAuth.service.js";
+import {
+  createStaffUser,
+  listStaffUsers,
+  removeStaffUser,
+  updateStaffUser,
+} from "../services/adminStaff.service.js";
 import {
   BILL_ANALYZER_SETTING_KEY,
   DEFAULT_BILL_ANALYZER_SYSTEM_PROMPT,
@@ -179,7 +189,94 @@ router.get("/me", requireAdmin, (req, res) => {
   res.json({ success: true, data: { user: req.admin } });
 });
 
-router.get("/analytics/overview", requireAdmin, async (req, res, next) => {
+router.get(
+  "/staff-users",
+  requireAdmin,
+  requireSuperAdmin,
+  async (_req, res, next) => {
+    try {
+      const users = await listStaffUsers();
+      res.json({ success: true, data: users });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.post(
+  "/staff-users",
+  requireAdmin,
+  requireSuperAdmin,
+  async (req, res, next) => {
+    try {
+      const { email, password, permissions } = req.body ?? {};
+      const user = await createStaffUser({ email, password, permissions });
+      res.status(201).json({ success: true, data: user });
+    } catch (error) {
+      if (error.status) {
+        res.status(error.status).json({
+          success: false,
+          message: error.message,
+        });
+        return;
+      }
+      next(error);
+    }
+  },
+);
+
+router.put(
+  "/staff-users/:id",
+  requireAdmin,
+  requireSuperAdmin,
+  async (req, res, next) => {
+    try {
+      const { email, password, permissions } = req.body ?? {};
+      const user = await updateStaffUser(req.params.id, {
+        email,
+        password,
+        permissions,
+      });
+      res.json({ success: true, data: user });
+    } catch (error) {
+      if (error.status) {
+        res.status(error.status).json({
+          success: false,
+          message: error.message,
+        });
+        return;
+      }
+      next(error);
+    }
+  },
+);
+
+router.delete(
+  "/staff-users/:id",
+  requireAdmin,
+  requireSuperAdmin,
+  async (req, res, next) => {
+    try {
+      const data = await removeStaffUser(req.params.id);
+      res.json({ success: true, data });
+    } catch (error) {
+      if (error.status) {
+        res.status(error.status).json({
+          success: false,
+          message: error.message,
+        });
+        return;
+      }
+      next(error);
+    }
+  },
+);
+
+router.get(
+  "/analytics/overview",
+  requireAdmin,
+  requireAdminPermission("dashboard"),
+  async (req, res, next) => {
   try {
     const data = await getAnalyticsOverview({
       from: req.query.from,
@@ -191,7 +288,11 @@ router.get("/analytics/overview", requireAdmin, async (req, res, next) => {
   }
 });
 
-router.get("/analytics/recent", requireAdmin, async (req, res, next) => {
+router.get(
+  "/analytics/recent",
+  requireAdmin,
+  requireAdminPermission("dashboard"),
+  async (req, res, next) => {
   try {
     const items = await getRecentActivity({ limit: req.query.limit });
     res.json({
@@ -216,7 +317,11 @@ router.get("/analytics/recent", requireAdmin, async (req, res, next) => {
   }
 });
 
-router.get("/visitors", requireAdmin, async (req, res, next) => {
+router.get(
+  "/visitors",
+  requireAdmin,
+  requireAdminPermission("users"),
+  async (req, res, next) => {
   try {
     const data = await listVisitors(req.query);
     res.json({
@@ -231,7 +336,11 @@ router.get("/visitors", requireAdmin, async (req, res, next) => {
   }
 });
 
-router.get("/visitors/:id", requireAdmin, async (req, res, next) => {
+router.get(
+  "/visitors/:id",
+  requireAdmin,
+  requireAdminPermission("users"),
+  async (req, res, next) => {
   try {
     const detail = await getVisitorDetail(req.params.id);
     if (!detail) {
@@ -276,7 +385,11 @@ router.get("/visitors/:id", requireAdmin, async (req, res, next) => {
   }
 });
 
-router.get("/assessments", requireAdmin, async (req, res, next) => {
+router.get(
+  "/assessments",
+  requireAdmin,
+  requireAdminPermission("assessments", "users"),
+  async (req, res, next) => {
   try {
     const data = await listAssessments(req.query);
     res.json({
@@ -291,7 +404,11 @@ router.get("/assessments", requireAdmin, async (req, res, next) => {
   }
 });
 
-router.get("/assessments/:id", requireAdmin, async (req, res, next) => {
+router.get(
+  "/assessments/:id",
+  requireAdmin,
+  requireAdminPermission("assessments", "users"),
+  async (req, res, next) => {
   try {
     const assessmentId = parseAssessmentIdParam(req.params.id);
     if (!Number.isFinite(assessmentId)) {
@@ -322,7 +439,11 @@ router.get("/assessments/:id", requireAdmin, async (req, res, next) => {
   }
 });
 
-router.get("/request-intros", requireAdmin, async (req, res, next) => {
+router.get(
+  "/request-intros",
+  requireAdmin,
+  requireAdminPermission("leads", "users"),
+  async (req, res, next) => {
   try {
     const data = await listRequestIntros(req.query);
     res.json({ success: true, data });
@@ -331,7 +452,11 @@ router.get("/request-intros", requireAdmin, async (req, res, next) => {
   }
 });
 
-router.get("/contact-messages", requireAdmin, async (req, res, next) => {
+router.get(
+  "/contact-messages",
+  requireAdmin,
+  requireAdminPermission("leads", "users"),
+  async (req, res, next) => {
   try {
     const data = await listContactMessages(req.query);
     res.json({ success: true, data });
@@ -340,7 +465,11 @@ router.get("/contact-messages", requireAdmin, async (req, res, next) => {
   }
 });
 
-router.get("/expert-reviews", requireAdmin, async (req, res, next) => {
+router.get(
+  "/expert-reviews",
+  requireAdmin,
+  requireAdminPermission("leads", "users"),
+  async (req, res, next) => {
   try {
     const data = await listExpertReviews(req.query);
     res.json({ success: true, data });
@@ -349,7 +478,11 @@ router.get("/expert-reviews", requireAdmin, async (req, res, next) => {
   }
 });
 
-router.get("/quote-uploads", requireAdmin, async (req, res, next) => {
+router.get(
+  "/quote-uploads",
+  requireAdmin,
+  requireAdminPermission("leads", "users"),
+  async (req, res, next) => {
   try {
     const data = await listQuoteUploads(req.query);
     res.json({ success: true, data });
@@ -358,7 +491,11 @@ router.get("/quote-uploads", requireAdmin, async (req, res, next) => {
   }
 });
 
-router.get("/financing-enquiries", requireAdmin, async (req, res, next) => {
+router.get(
+  "/financing-enquiries",
+  requireAdmin,
+  requireAdminPermission("financing", "users"),
+  async (req, res, next) => {
   try {
     const data = await listFinancingEnquiries(req.query);
     res.json({
@@ -391,7 +528,11 @@ async function loadFinancingForAdmin(req, res) {
   return row;
 }
 
-router.get("/financing-enquiries/:id", requireAdmin, async (req, res, next) => {
+router.get(
+  "/financing-enquiries/:id",
+  requireAdmin,
+  requireAdminPermission("financing", "users"),
+  async (req, res, next) => {
   try {
     const row = await loadFinancingForAdmin(req, res);
     if (!row) return;
@@ -404,6 +545,7 @@ router.get("/financing-enquiries/:id", requireAdmin, async (req, res, next) => {
 router.patch(
   "/financing-enquiries/:id",
   requireAdmin,
+  requireAdminPermission("financing", "users"),
   async (req, res, next) => {
     try {
       const row = await loadFinancingForAdmin(req, res);
@@ -460,6 +602,7 @@ router.patch(
 router.get(
   "/expert-reviews/:id/file",
   requireAdmin,
+  requireAdminPermission("leads", "users"),
   async (req, res, next) => {
     try {
       const row = await getExpertReviewById(Number(req.params.id));
@@ -485,7 +628,11 @@ router.get(
   },
 );
 
-router.get("/quote-uploads/:id/file", requireAdmin, async (req, res, next) => {
+router.get(
+  "/quote-uploads/:id/file",
+  requireAdmin,
+  requireAdminPermission("leads", "users"),
+  async (req, res, next) => {
   try {
     const row = await getQuoteUploadById(Number(req.params.id));
     if (!row?.storage_path) {
@@ -509,11 +656,19 @@ router.get("/quote-uploads/:id/file", requireAdmin, async (req, res, next) => {
   }
 });
 
-router.get("/excel/template", requireAdmin, (_req, res) => {
+router.get(
+  "/excel/template",
+  requireAdmin,
+  requireAdminPermission("excel-template"),
+  (_req, res) => {
   res.json({ success: true, data: getTemplateInfo() });
 });
 
-router.get("/excel/template/download", requireAdmin, (req, res, next) => {
+router.get(
+  "/excel/template/download",
+  requireAdmin,
+  requireAdminPermission("excel-template"),
+  (req, res, next) => {
   try {
     const templatePath = getTemplateDownloadPath();
     if (!templatePath) {
@@ -539,6 +694,7 @@ router.get("/excel/template/download", requireAdmin, (req, res, next) => {
 router.post(
   "/excel/template",
   requireAdmin,
+  requireAdminPermission("excel-template"),
   upload.single("file"),
   async (req, res, next) => {
     try {
@@ -583,7 +739,11 @@ router.post(
 
 const BILL_PROMPT_MAX_LEN = 50_000;
 
-router.get("/ai-prompts/bill", requireAdmin, async (_req, res, next) => {
+router.get(
+  "/ai-prompts/bill",
+  requireAdmin,
+  requireAdminPermission("bill-input"),
+  async (_req, res, next) => {
   try {
     const row = await getSetting(BILL_ANALYZER_SETTING_KEY);
     res.json({
@@ -601,7 +761,11 @@ router.get("/ai-prompts/bill", requireAdmin, async (_req, res, next) => {
   }
 });
 
-router.put("/ai-prompts/bill", requireAdmin, async (req, res, next) => {
+router.put(
+  "/ai-prompts/bill",
+  requireAdmin,
+  requireAdminPermission("bill-input"),
+  async (req, res, next) => {
   try {
     const value =
       typeof req.body?.value === "string" ? req.body.value.trim() : "";
@@ -639,7 +803,11 @@ router.put("/ai-prompts/bill", requireAdmin, async (req, res, next) => {
 
 const RECOMMENDATION_PROMPT_MAX_LEN = 50_000;
 
-router.get("/ai-prompts/recommendation", requireAdmin, async (_req, res, next) => {
+router.get(
+  "/ai-prompts/recommendation",
+  requireAdmin,
+  requireAdminPermission("recommendations"),
+  async (_req, res, next) => {
   try {
     const row = await getSetting(RECOMMENDATION_SETTING_KEY);
     res.json({
@@ -657,7 +825,11 @@ router.get("/ai-prompts/recommendation", requireAdmin, async (_req, res, next) =
   }
 });
 
-router.put("/ai-prompts/recommendation", requireAdmin, async (req, res, next) => {
+router.put(
+  "/ai-prompts/recommendation",
+  requireAdmin,
+  requireAdminPermission("recommendations"),
+  async (req, res, next) => {
   try {
     const value =
       typeof req.body?.value === "string" ? req.body.value.trim() : "";
@@ -696,6 +868,7 @@ router.put("/ai-prompts/recommendation", requireAdmin, async (req, res, next) =>
 router.get(
   "/ai-prompts/quick-snapshot-recommendation",
   requireAdmin,
+  requireAdminPermission("recommendations"),
   async (_req, res, next) => {
     try {
       const row = await getSetting(QUICK_SNAPSHOT_RECOMMENDATION_SETTING_KEY);
@@ -718,6 +891,7 @@ router.get(
 router.put(
   "/ai-prompts/quick-snapshot-recommendation",
   requireAdmin,
+  requireAdminPermission("recommendations"),
   async (req, res, next) => {
     try {
       const value =
@@ -761,7 +935,11 @@ router.put(
 const CHATBOT_PROMPT_MAX_LEN = 50_000;
 const FAQ_TEXT_MAX_LEN = 5_000;
 
-router.get("/ai-prompts/chatbot", requireAdmin, async (_req, res, next) => {
+router.get(
+  "/ai-prompts/chatbot",
+  requireAdmin,
+  requireSuperAdmin,
+  async (_req, res, next) => {
   try {
     const row = await getSetting(CHATBOT_SETTING_KEY);
     res.json({
@@ -777,7 +955,11 @@ router.get("/ai-prompts/chatbot", requireAdmin, async (_req, res, next) => {
   }
 });
 
-router.put("/ai-prompts/chatbot", requireAdmin, async (req, res, next) => {
+router.put(
+  "/ai-prompts/chatbot",
+  requireAdmin,
+  requireSuperAdmin,
+  async (req, res, next) => {
   try {
     const value =
       typeof req.body?.value === "string" ? req.body.value.trim() : "";
@@ -851,7 +1033,7 @@ function parseFaqPayload(body, { partial = false } = {}) {
   return { question, answer, sortOrder, isActive };
 }
 
-router.get("/faqs", requireAdmin, async (_req, res, next) => {
+router.get("/faqs", requireAdmin, requireSuperAdmin, async (_req, res, next) => {
   try {
     const faqs = await listFaqs();
     res.json({ success: true, data: faqs });
@@ -860,7 +1042,7 @@ router.get("/faqs", requireAdmin, async (_req, res, next) => {
   }
 });
 
-router.post("/faqs", requireAdmin, async (req, res, next) => {
+router.post("/faqs", requireAdmin, requireSuperAdmin, async (req, res, next) => {
   try {
     const parsed = parseFaqPayload(req.body, { partial: false });
     if (parsed.error) {
@@ -885,7 +1067,11 @@ router.post("/faqs", requireAdmin, async (req, res, next) => {
   }
 });
 
-router.put("/faqs/:id", requireAdmin, async (req, res, next) => {
+router.put(
+  "/faqs/:id",
+  requireAdmin,
+  requireSuperAdmin,
+  async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
@@ -922,7 +1108,11 @@ router.put("/faqs/:id", requireAdmin, async (req, res, next) => {
   }
 });
 
-router.delete("/faqs/:id", requireAdmin, async (req, res, next) => {
+router.delete(
+  "/faqs/:id",
+  requireAdmin,
+  requireSuperAdmin,
+  async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {

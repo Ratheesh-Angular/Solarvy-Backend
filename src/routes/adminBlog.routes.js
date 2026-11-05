@@ -1,6 +1,9 @@
 import { Router } from "express";
 import multer from "multer";
-import { requireAdmin } from "../middleware/requireAdmin.js";
+import {
+  requireAdmin,
+  requireAdminPermission,
+} from "../middleware/requireAdmin.js";
 import {
   createBlog,
   deleteBlog,
@@ -44,7 +47,7 @@ function parseId(value) {
 
 router.use(requireAdmin);
 
-router.get("/", async (req, res, next) => {
+router.get("/", requireAdminPermission("blogs"), async (req, res, next) => {
   try {
     const data = await listAdminBlogs(req.query);
     res.json({ success: true, data });
@@ -53,7 +56,7 @@ router.get("/", async (req, res, next) => {
   }
 });
 
-router.post("/images", (req, res, next) => {
+router.post("/images", requireAdminPermission("blogs"), (req, res, next) => {
   imageUpload.single("file")(req, res, async (uploadError) => {
     if (uploadError) {
       const message =
@@ -83,7 +86,10 @@ router.post("/images", (req, res, next) => {
   });
 });
 
-router.get("/analytics/overview", async (req, res, next) => {
+router.get(
+  "/analytics/overview",
+  requireAdminPermission("blog-analytics"),
+  async (req, res, next) => {
   try {
     const data = await getBlogAnalyticsOverview({
       from: req.query.from,
@@ -95,7 +101,10 @@ router.get("/analytics/overview", async (req, res, next) => {
   }
 });
 
-router.get("/analytics/popular", async (req, res, next) => {
+router.get(
+  "/analytics/popular",
+  requireAdminPermission("blog-analytics"),
+  async (req, res, next) => {
   try {
     const data = await getPopularBlogsAnalytics({
       from: req.query.from,
@@ -108,7 +117,10 @@ router.get("/analytics/popular", async (req, res, next) => {
   }
 });
 
-router.get("/:id/analytics", async (req, res, next) => {
+router.get(
+  "/:id/analytics",
+  requireAdminPermission("blog-analytics"),
+  async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
     if (!id) {
@@ -136,7 +148,7 @@ router.get("/:id/analytics", async (req, res, next) => {
   }
 });
 
-router.get("/:id", async (req, res, next) => {
+router.get("/:id", requireAdminPermission("blogs"), async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
     if (!id) {
@@ -154,7 +166,7 @@ router.get("/:id", async (req, res, next) => {
   }
 });
 
-router.post("/", async (req, res, next) => {
+router.post("/", requireAdminPermission("blogs"), async (req, res, next) => {
   try {
     const parsed = parseBlogPayload(req.body, { partial: false });
     if (parsed.error) {
@@ -168,7 +180,7 @@ router.post("/", async (req, res, next) => {
   }
 });
 
-router.put("/:id", async (req, res, next) => {
+router.put("/:id", requireAdminPermission("blogs"), async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
     if (!id) {
@@ -192,7 +204,10 @@ router.put("/:id", async (req, res, next) => {
   }
 });
 
-router.delete("/:id", async (req, res, next) => {
+router.delete(
+  "/:id",
+  requireAdminPermission("blogs"),
+  async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
     if (!id) {

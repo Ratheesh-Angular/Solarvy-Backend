@@ -29,3 +29,57 @@ export async function requireAdmin(req, res, next) {
     next(error);
   }
 }
+
+export function requireSuperAdmin(req, res, next) {
+  if (!req.admin) {
+    res.status(401).json({
+      success: false,
+      message: "Authentication required",
+    });
+    return;
+  }
+
+  if (!req.admin.isSuperAdmin) {
+    res.status(403).json({
+      success: false,
+      message: "Super admin access required",
+    });
+    return;
+  }
+
+  next();
+}
+
+export function requireAdminPermission(...pageKeys) {
+  const keys = pageKeys.flat().filter(Boolean);
+
+  return function requirePermission(req, res, next) {
+    if (!req.admin) {
+      res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
+      return;
+    }
+
+    if (req.admin.isSuperAdmin) {
+      next();
+      return;
+    }
+
+    const permissions = Array.isArray(req.admin.permissions)
+      ? req.admin.permissions
+      : [];
+
+    const allowed = keys.some((key) => permissions.includes(key));
+    if (!allowed) {
+      res.status(403).json({
+        success: false,
+        message: "You do not have access to this resource",
+      });
+      return;
+    }
+
+    next();
+  };
+}

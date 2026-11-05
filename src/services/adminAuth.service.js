@@ -1,9 +1,12 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { ADMIN_PAGE_KEYS } from "../config/adminPermissions.js";
 import {
   createAdminUser,
   findAdminById,
+  findAdminByLogin,
   findAdminByUsername,
+  markAdminAsSuperAdmin,
   updateAdminPasswordHash,
 } from "../repositories/admin.repository.js";
 
@@ -15,6 +18,17 @@ function getJwtSecret() {
     throw new Error("JWT_SECRET is not configured");
   }
   return secret;
+}
+
+function toPublicAdmin(admin) {
+  const isSuperAdmin = Boolean(admin.is_super_admin);
+  return {
+    id: admin.id,
+    username: admin.username,
+    email: admin.email ?? null,
+    isSuperAdmin,
+    permissions: isSuperAdmin ? [...ADMIN_PAGE_KEYS] : admin.permissions || [],
+  };
 }
 
 export async function seedAdminUser() {
@@ -30,11 +44,13 @@ export async function seedAdminUser() {
 
   if (existing) {
     await updateAdminPasswordHash(existing.id, passwordHash);
+    await markAdminAsSuperAdmin(existing.id);
     console.log(`Admin credentials synced from env for: ${username}`);
     return { action: "synced", username };
   }
 
   const user = await createAdminUser(username, passwordHash);
+  await markAdminAsSuperAdmin(user.id);
   console.log(`Admin user created: ${user.username}`);
   return { action: "created", username: user.username };
 }
@@ -45,7 +61,7 @@ export async function loginAdmin(username, password) {
     throw new Error("Username and password are required");
   }
 
-  const admin = await findAdminByUsername(normalizedUsername);
+  const admin = await findAdminByLogin(normalizedUsername);
   if (!admin) {
     throw new Error("Invalid username or password");
   }
@@ -55,18 +71,20 @@ export async function loginAdmin(username, password) {
     throw new Error("Invalid username or password");
   }
 
+  const publicUser = toPublicAdmin(admin);
   const token = jwt.sign(
-    { sub: admin.id, username: admin.username },
+    {
+      sub: admin.id,
+      username: admin.username,
+      isSuperAdmin: publicUser.isSuperAdmin,
+    },
     getJwtSecret(),
     { expiresIn: TOKEN_EXPIRY },
   );
 
   return {
     token,
-    user: {
-      id: admin.id,
-      username: admin.username,
-    },
+    user: publicUser,
   };
 }
 
@@ -77,10 +95,7 @@ export async function verifyAdminToken(token) {
     const payload = jwt.verify(token, getJwtSecret());
     const admin = await findAdminById(payload.sub);
     if (!admin) return null;
-    return {
-      id: admin.id,
-      username: admin.username,
-    };
+    return toPublicAdmin(admin);
   } catch {
     return null;
   }

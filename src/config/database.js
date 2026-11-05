@@ -268,6 +268,54 @@ async function initSchema(db) {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS users (
+      id UUID PRIMARY KEY,
+      full_name VARCHAR(255) NOT NULL DEFAULT '',
+      email VARCHAR(255) NOT NULL,
+      phone_e164 VARCHAR(32) NOT NULL DEFAULT '',
+      auth_provider VARCHAR(20) NOT NULL DEFAULT 'email',
+      google_sub VARCHAR(255) NULL,
+      email_verified_at TIMESTAMPTZ NULL,
+      country VARCHAR(120) NOT NULL DEFAULT '',
+      region VARCHAR(120) NOT NULL DEFAULT '',
+      city VARCHAR(120) NOT NULL DEFAULT '',
+      latitude DOUBLE PRECISION NULL,
+      longitude DOUBLE PRECISION NULL,
+      ip_country VARCHAR(120) NOT NULL DEFAULT '',
+      ip_region VARCHAR(120) NOT NULL DEFAULT '',
+      ip_city VARCHAR(120) NOT NULL DEFAULT '',
+      last_ip VARCHAR(64) NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_login_at TIMESTAMPTZ NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS email_otps (
+      id BIGSERIAL PRIMARY KEY,
+      email VARCHAR(255) NOT NULL,
+      purpose VARCHAR(40) NOT NULL,
+      code_hash VARCHAR(255) NOT NULL,
+      payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+      expires_at TIMESTAMPTZ NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      consumed_at TIMESTAMPTZ NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await db.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower
+      ON users (LOWER(email))
+  `);
+  await db.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub
+      ON users (google_sub)
+      WHERE google_sub IS NOT NULL
+  `);
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_email_otps_email_purpose
+      ON email_otps (LOWER(email), purpose, created_at DESC)
   `);
 
   // Migrate legacy financing statuses → tracker-aligned values.
@@ -318,6 +366,30 @@ async function initSchema(db) {
     "TEXT DEFAULT ''",
   );
   await ensureColumn(db, "visitors", "user_number", "INTEGER");
+
+  await ensureColumn(db, "admin_users", "email", "VARCHAR(255) NULL");
+  await ensureColumn(
+    db,
+    "admin_users",
+    "is_super_admin",
+    "BOOLEAN NOT NULL DEFAULT false",
+  );
+  await ensureColumn(
+    db,
+    "admin_users",
+    "permissions",
+    "JSONB NOT NULL DEFAULT '[]'::jsonb",
+  );
+  // Staff usernames are set to email; allow full email length.
+  await db.query(`
+    ALTER TABLE admin_users
+      ALTER COLUMN username TYPE VARCHAR(255)
+  `);
+  await db.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_users_email_lower
+      ON admin_users (LOWER(email))
+      WHERE email IS NOT NULL
+  `);
 
   // Backfill sequential user_number for existing visitors, then enforce uniqueness.
   await db.query(`
