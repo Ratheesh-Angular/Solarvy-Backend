@@ -254,7 +254,7 @@ export const DROPDOWN_FALLBACKS = {
   financeRoutes: [
     "Any",
     "Asset financing",
-    "Solar instalment plan",
+    "Solar installment plan",
     "Energy-as-a-Service / lease",
   ],
   financeRepaymentTerms: ["12-24 months", "24-36 months", "36+ months"],
