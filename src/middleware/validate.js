@@ -1,9 +1,14 @@
+import {
+  isValidEmail as isValidEmailUtil,
+  normalizeNigeriaPhone,
+} from "../utils/phone.js";
+
 function isNonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
 
 function isValidEmail(value) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  return isValidEmailUtil(value);
 }
 
 export function validateRequestIntro(req, res, next) {
@@ -100,6 +105,24 @@ export function validateFinancingEnquiry(req, res, next) {
     body.confirmTerms !== true
   ) {
     fail("All consent confirmations are required");
+    return;
+  }
+
+  if (
+    !isNonEmptyString(body.contactFullName) ||
+    body.contactFullName.trim().length > 255
+  ) {
+    fail("Full name is required");
+    return;
+  }
+
+  if (!isValidEmail(body.contactEmail) || String(body.contactEmail).trim().length > 255) {
+    fail("Valid email address is required");
+    return;
+  }
+
+  if (!normalizeNigeriaPhone(body.contactPhone)) {
+    fail("Valid Nigeria phone number is required");
     return;
   }
 

@@ -44,12 +44,14 @@ export async function createFinancingEnquiry(data) {
            reference, visitor_id, session_id, assessment_id,
            applicant_type, amount_to_finance, deposit_available,
            repayment_period, repayment_label, income_range, location, notes,
+           contact_full_name, contact_email, contact_phone,
            route_id, route_label, partner_id, partner_name,
            partner_snapshot, shared_items, project_snapshot,
            consent_share, confirm_accurate, confirm_terms
          ) VALUES (
            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-           $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
+           $13, $14, $15, $16, $17, $18, $19, $20, $21, $22,
+           $23, $24, $25
          )
          RETURNING id, reference, created_at`,
         [
@@ -65,6 +67,9 @@ export async function createFinancingEnquiry(data) {
           data.incomeRange,
           data.location,
           data.notes,
+          data.contactFullName,
+          data.contactEmail,
+          data.contactPhone,
           data.routeId,
           data.routeLabel,
           data.partnerId,

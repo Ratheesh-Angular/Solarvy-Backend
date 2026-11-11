@@ -252,6 +252,9 @@ async function initSchema(db) {
       income_range VARCHAR(80) NOT NULL DEFAULT '',
       location VARCHAR(120) NOT NULL DEFAULT '',
       notes TEXT NOT NULL DEFAULT '',
+      contact_full_name VARCHAR(255) NOT NULL DEFAULT '',
+      contact_email VARCHAR(255) NOT NULL DEFAULT '',
+      contact_phone VARCHAR(40) NOT NULL DEFAULT '',
       route_id VARCHAR(80) NOT NULL DEFAULT '',
       route_label VARCHAR(160) NOT NULL DEFAULT '',
       partner_id VARCHAR(120) NOT NULL DEFAULT '',
@@ -335,6 +338,25 @@ async function initSchema(db) {
     ALTER TABLE financing_enquiries
       ALTER COLUMN status SET DEFAULT 'enquiry_submitted'
   `);
+
+  await ensureColumn(
+    db,
+    "financing_enquiries",
+    "contact_full_name",
+    "VARCHAR(255) NOT NULL DEFAULT ''",
+  );
+  await ensureColumn(
+    db,
+    "financing_enquiries",
+    "contact_email",
+    "VARCHAR(255) NOT NULL DEFAULT ''",
+  );
+  await ensureColumn(
+    db,
+    "financing_enquiries",
+    "contact_phone",
+    "VARCHAR(40) NOT NULL DEFAULT ''",
+  );
 
   await ensureColumn(db, "assessment_drafts", "visitor_id", "UUID NULL");
   await ensureColumn(db, "assessment_drafts", "session_id", "UUID NULL");

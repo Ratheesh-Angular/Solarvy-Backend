@@ -12,6 +12,7 @@ import {
   formatAssessmentId,
   parseAssessmentIdParam,
 } from "../utils/assessmentId.js";
+import { normalizeNigeriaPhone } from "../utils/phone.js";
 
 const router = Router();
 
@@ -85,6 +86,9 @@ router.post("/", validateFinancingEnquiry, async (req, res, next) => {
       incomeRange: clip(body.incomeRange, 80),
       location: clip(body.location, 120),
       notes: clip(body.notes, 2000),
+      contactFullName: clip(body.contactFullName, 255),
+      contactEmail: clip(body.contactEmail, 255).toLowerCase(),
+      contactPhone: normalizeNigeriaPhone(body.contactPhone) || "",
       routeId: clip(body.routeId, 80),
       routeLabel: clip(body.routeLabel, 160),
       partnerId: partnerSnapshot.id,

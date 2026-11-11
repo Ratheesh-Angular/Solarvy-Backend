@@ -354,7 +354,15 @@ export async function listQuoteUploads(query = {}) {
 
 export async function listFinancingEnquiries(query = {}) {
   return listLeadTable("financing_enquiries", query, {
-    searchColumns: ["reference", "partner_name", "location", "visitor_id::text"],
+    searchColumns: [
+      "reference",
+      "partner_name",
+      "location",
+      "contact_full_name",
+      "contact_email",
+      "contact_phone",
+      "visitor_id::text",
+    ],
   });
 }
 
