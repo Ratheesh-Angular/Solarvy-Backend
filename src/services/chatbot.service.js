@@ -10,7 +10,9 @@ import {
   listFaqs,
   listRecentChatMessages,
   touchChatSession,
+  updateChatSession,
 } from "../repositories/chatbot.repository.js";
+import { runAssessmentChatTurn } from "./assessmentChat.service.js";
 import { completeChatMessages } from "./openai.service.js";
 
 export const CHAT_MESSAGE_MAX_LEN = 1000;
@@ -47,7 +49,6 @@ function assertRateLimit(key, { limit = 20, windowMs = 60_000 } = {}) {
     throw error;
   }
 
-  // Prevent unbounded growth
   if (rateBuckets.size > 5_000) {
     for (const [k, v] of rateBuckets) {
       if (now - v.windowStart >= windowMs) rateBuckets.delete(k);
@@ -74,7 +75,6 @@ function validateMessage(raw) {
     error.status = 400;
     throw error;
   }
-  // Soft spam / gibberish guard
   if (/^(.)\1{20,}$/.test(message) || message.replace(/\s/g, "").length < 2) {
     const error = new Error(
       "Please ask a clearer question about Solarvy or solar energy.",
@@ -94,6 +94,15 @@ function isUuid(value) {
   );
 }
 
+function parseMode(raw) {
+  return raw === "assessment" ? "assessment" : "faq";
+}
+
+function parseDraftId(raw) {
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
 async function resolveSystemPrompt() {
   const row = await getSetting(CHATBOT_SETTING_KEY);
   const base = (row?.value || DEFAULT_CHATBOT_SYSTEM_PROMPT).trim();
@@ -109,19 +118,42 @@ function formatFaqContext(faqs) {
   return `\n\nFAQ CONTEXT (prefer these for matching questions):\n${lines.join("\n\n")}`;
 }
 
-async function ensureSession(sessionId, visitorId) {
+async function ensureSession(sessionId, visitorId, { mode, draftId } = {}) {
   if (sessionId && isUuid(sessionId)) {
     const existing = await getChatSession(sessionId);
-    if (existing) return existing;
+    if (existing) {
+      const nextMode = mode || existing.mode || "faq";
+      const nextDraft =
+        draftId != null ? draftId : existing.draftId ?? null;
+      if (
+        nextMode !== existing.mode ||
+        (draftId != null && draftId !== existing.draftId)
+      ) {
+        return (
+          (await updateChatSession(existing.id, {
+            mode: nextMode,
+            draftId: nextDraft,
+          })) || existing
+        );
+      }
+      return existing;
+    }
   }
 
   const safeVisitorId = isUuid(visitorId) ? visitorId : null;
   try {
-    return await createChatSession({ visitorId: safeVisitorId });
+    return await createChatSession({
+      visitorId: safeVisitorId,
+      draftId: draftId ?? null,
+      mode: mode || "faq",
+    });
   } catch (error) {
-    // Visitor header may be stale / not yet synced — still allow chat.
     if (safeVisitorId) {
-      return createChatSession({ visitorId: null });
+      return createChatSession({
+        visitorId: null,
+        draftId: draftId ?? null,
+        mode: mode || "faq",
+      });
     }
     throw error;
   }
@@ -129,13 +161,21 @@ async function ensureSession(sessionId, visitorId) {
 
 /**
  * Handle one user chat turn: validate, persist, call OpenAI with history + FAQ context.
+ * When mode=assessment, collect form fields into a shared assessment draft.
  */
 export async function handleChatTurn(req) {
   assertRateLimit(getClientKey(req));
 
   const message = validateMessage(req.body?.message);
+  const mode = parseMode(req.body?.mode);
+  const draftIdHint = parseDraftId(req.body?.draftId);
   const visitorId = req.headers["x-visitor-id"];
-  const session = await ensureSession(req.body?.sessionId, visitorId);
+  const visitorSessionId = req.headers["x-session-id"];
+
+  const session = await ensureSession(req.body?.sessionId, visitorId, {
+    mode,
+    draftId: draftIdHint,
+  });
 
   await addChatMessage({
     sessionId: session.id,
@@ -143,6 +183,45 @@ export async function handleChatTurn(req) {
     content: message,
   });
   await touchChatSession(session.id);
+
+  if (mode === "assessment") {
+    const history = await listRecentChatMessages(
+      session.id,
+      CHAT_HISTORY_LIMIT,
+    );
+    // History already includes the user message just saved — strip trailing
+    // duplicate when building the model prompt inside runAssessmentChatTurn.
+    const historyForModel = history.slice(0, -1);
+
+    const result = await runAssessmentChatTurn({
+      userMessage: message,
+      history: historyForModel,
+      draftId: draftIdHint || session.draftId,
+      visitorId: isUuid(visitorId) ? visitorId : null,
+      visitorSessionId: isUuid(visitorSessionId) ? visitorSessionId : null,
+    });
+
+    await addChatMessage({
+      sessionId: session.id,
+      role: "assistant",
+      content: result.reply,
+    });
+    await updateChatSession(session.id, {
+      mode: "assessment",
+      draftId: result.draftId,
+    });
+
+    return {
+      sessionId: session.id,
+      reply: result.reply,
+      mode: "assessment",
+      draftId: result.draftId,
+      formData: result.formData,
+      missingFields: result.missingFields,
+      suggestedReplies: result.suggestedReplies,
+      readyToComplete: result.readyToComplete,
+    };
+  }
 
   const [systemPrompt, faqs, history] = await Promise.all([
     resolveSystemPrompt(),
@@ -182,10 +261,11 @@ export async function handleChatTurn(req) {
     role: "assistant",
     content: safeReply,
   });
-  await touchChatSession(session.id);
+  await updateChatSession(session.id, { mode: "faq" });
 
   return {
     sessionId: session.id,
     reply: safeReply,
+    mode: "faq",
   };
 }

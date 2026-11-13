@@ -10,6 +10,9 @@ export const ADMIN_PAGE_KEYS = [
   "blog-analytics",
   "bill-input",
   "recommendations",
+  "chatbot-prompt",
+  "faqs",
+  "chat-sessions",
 ];
 
 export const ADMIN_PAGE_KEY_SET = new Set(ADMIN_PAGE_KEYS);

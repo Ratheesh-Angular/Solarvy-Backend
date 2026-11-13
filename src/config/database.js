@@ -362,6 +362,13 @@ async function initSchema(db) {
   await ensureColumn(db, "assessment_drafts", "session_id", "UUID NULL");
   await ensureColumn(db, "assessments", "visitor_id", "UUID NULL");
   await ensureColumn(db, "assessments", "session_id", "UUID NULL");
+  await ensureColumn(db, "chat_sessions", "draft_id", "INTEGER NULL");
+  await ensureColumn(
+    db,
+    "chat_sessions",
+    "mode",
+    "VARCHAR(32) NOT NULL DEFAULT 'faq'",
+  );
   await ensureColumn(db, "request_intros", "visitor_id", "UUID NULL");
   await ensureColumn(db, "request_intros", "session_id", "UUID NULL");
   await ensureColumn(db, "expert_reviews", "visitor_id", "UUID NULL");
@@ -468,6 +475,8 @@ async function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_quote_uploads_visitor ON quote_uploads (visitor_id);
     CREATE INDEX IF NOT EXISTS idx_quote_uploads_created ON quote_uploads (created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_chat_sessions_updated ON chat_sessions (updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_chat_sessions_mode ON chat_sessions (mode, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_chat_sessions_draft ON chat_sessions (draft_id);
     CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages (session_id, created_at ASC);
     CREATE INDEX IF NOT EXISTS idx_faq_entries_active_sort ON faq_entries (is_active, sort_order ASC, id ASC);
     CREATE INDEX IF NOT EXISTS idx_blogs_status_published ON blogs (status, published_at DESC);
@@ -498,11 +507,13 @@ async function seedAppSettings() {
   const {
     CHATBOT_SETTING_KEY,
     DEFAULT_CHATBOT_SYSTEM_PROMPT,
+    CHATBOT_ASSESSMENT_SETTING_KEY,
+    DEFAULT_CHATBOT_ASSESSMENT_SYSTEM_PROMPT,
   } = await import("./chatbotDefaults.js");
 
   await pool.query(
     `INSERT INTO app_settings (key, value, updated_at)
-     VALUES ($1, $2, NOW()), ($3, $4, NOW()), ($5, $6, NOW()), ($7, $8, NOW())
+     VALUES ($1, $2, NOW()), ($3, $4, NOW()), ($5, $6, NOW()), ($7, $8, NOW()), ($9, $10, NOW())
      ON CONFLICT (key) DO NOTHING`,
     [
       BILL_ANALYZER_SETTING_KEY,
@@ -513,6 +524,8 @@ async function seedAppSettings() {
       DEFAULT_QUICK_SNAPSHOT_RECOMMENDATION_SYSTEM_PROMPT,
       CHATBOT_SETTING_KEY,
       DEFAULT_CHATBOT_SYSTEM_PROMPT,
+      CHATBOT_ASSESSMENT_SETTING_KEY,
+      DEFAULT_CHATBOT_ASSESSMENT_SYSTEM_PROMPT,
     ],
   );
 }

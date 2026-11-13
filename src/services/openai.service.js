@@ -92,6 +92,7 @@ export async function completeChatText({ systemPrompt, userPrompt }) {
 export async function completeChatMessages({
   messages,
   timeoutMs = 45_000,
+  jsonObject = false,
 } = {}) {
   if (!Array.isArray(messages) || messages.length === 0) {
     throw new Error("Chat messages are required");
@@ -104,13 +105,17 @@ export async function completeChatMessages({
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await openai.chat.completions.create(
-      {
-        model,
-        messages,
-      },
-      { signal: controller.signal },
-    );
+    const payload = {
+      model,
+      messages,
+    };
+    if (jsonObject) {
+      payload.response_format = { type: "json_object" };
+    }
+
+    const response = await openai.chat.completions.create(payload, {
+      signal: controller.signal,
+    });
 
     const content = response.choices?.[0]?.message?.content;
     if (!content || typeof content !== "string") {

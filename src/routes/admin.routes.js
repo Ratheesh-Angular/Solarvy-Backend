@@ -26,7 +26,9 @@ import {
   withRecommendationContextPreamble,
 } from "../config/recommendationDefaults.js";
 import {
+  CHATBOT_ASSESSMENT_SETTING_KEY,
   CHATBOT_SETTING_KEY,
+  DEFAULT_CHATBOT_ASSESSMENT_SYSTEM_PROMPT,
   DEFAULT_CHATBOT_SYSTEM_PROMPT,
 } from "../config/chatbotDefaults.js";
 import {
@@ -36,8 +38,12 @@ import {
 import {
   createFaq,
   deleteFaq,
+  getChatAnalyticsSummary,
+  getChatSessionDetail,
   getFaqById,
+  listChatSessions,
   listFaqs,
+  countChatSessions,
   updateFaq,
 } from "../repositories/chatbot.repository.js";
 import {
@@ -941,7 +947,7 @@ const FAQ_TEXT_MAX_LEN = 5_000;
 router.get(
   "/ai-prompts/chatbot",
   requireAdmin,
-  requireSuperAdmin,
+  requireAdminPermission("chatbot-prompt"),
   async (_req, res, next) => {
   try {
     const row = await getSetting(CHATBOT_SETTING_KEY);
@@ -961,7 +967,7 @@ router.get(
 router.put(
   "/ai-prompts/chatbot",
   requireAdmin,
-  requireSuperAdmin,
+  requireAdminPermission("chatbot-prompt"),
   async (req, res, next) => {
   try {
     const value =
@@ -997,6 +1003,126 @@ router.put(
     next(error);
   }
 });
+
+router.get(
+  "/ai-prompts/chatbot-assessment",
+  requireAdmin,
+  requireAdminPermission("chatbot-prompt"),
+  async (_req, res, next) => {
+    try {
+      const row = await getSetting(CHATBOT_ASSESSMENT_SETTING_KEY);
+      res.json({
+        success: true,
+        data: {
+          key: CHATBOT_ASSESSMENT_SETTING_KEY,
+          value: row?.value ?? DEFAULT_CHATBOT_ASSESSMENT_SYSTEM_PROMPT,
+          updatedAt: row?.updatedAt ?? null,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.put(
+  "/ai-prompts/chatbot-assessment",
+  requireAdmin,
+  requireAdminPermission("chatbot-prompt"),
+  async (req, res, next) => {
+    try {
+      const value =
+        typeof req.body?.value === "string" ? req.body.value.trim() : "";
+
+      if (!value) {
+        res.status(400).json({
+          success: false,
+          message: "Prompt value is required",
+        });
+        return;
+      }
+
+      if (value.length > CHATBOT_PROMPT_MAX_LEN) {
+        res.status(400).json({
+          success: false,
+          message: `Prompt must be at most ${CHATBOT_PROMPT_MAX_LEN} characters`,
+        });
+        return;
+      }
+
+      const row = await upsertSetting(CHATBOT_ASSESSMENT_SETTING_KEY, value);
+      res.json({
+        success: true,
+        message: "Assessment chatbot AI prompt updated",
+        data: {
+          key: row.key,
+          value: row.value,
+          updatedAt: row.updatedAt,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.get(
+  "/chat/analytics",
+  requireAdmin,
+  requireAdminPermission("chat-sessions"),
+  async (_req, res, next) => {
+    try {
+      const data = await getChatAnalyticsSummary();
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.get(
+  "/chat/sessions",
+  requireAdmin,
+  requireAdminPermission("chat-sessions"),
+  async (req, res, next) => {
+    try {
+      const mode =
+        req.query.mode === "faq" || req.query.mode === "assessment"
+          ? req.query.mode
+          : null;
+      const limit = Number(req.query.limit) || 50;
+      const offset = Number(req.query.offset) || 0;
+      const [sessions, total] = await Promise.all([
+        listChatSessions({ mode, limit, offset }),
+        countChatSessions({ mode }),
+      ]);
+      res.json({
+        success: true,
+        data: { sessions, total, limit, offset },
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.get(
+  "/chat/sessions/:id",
+  requireAdmin,
+  requireAdminPermission("chat-sessions"),
+  async (req, res, next) => {
+    try {
+      const detail = await getChatSessionDetail(req.params.id);
+      if (!detail) {
+        res.status(404).json({ success: false, message: "Chat session not found" });
+        return;
+      }
+      res.json({ success: true, data: detail });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
 
 function parseFaqPayload(body, { partial = false } = {}) {
   const question =
@@ -1036,7 +1162,11 @@ function parseFaqPayload(body, { partial = false } = {}) {
   return { question, answer, sortOrder, isActive };
 }
 
-router.get("/faqs", requireAdmin, requireSuperAdmin, async (_req, res, next) => {
+router.get(
+  "/faqs",
+  requireAdmin,
+  requireAdminPermission("faqs"),
+  async (_req, res, next) => {
   try {
     const faqs = await listFaqs();
     res.json({ success: true, data: faqs });
@@ -1045,7 +1175,11 @@ router.get("/faqs", requireAdmin, requireSuperAdmin, async (_req, res, next) => 
   }
 });
 
-router.post("/faqs", requireAdmin, requireSuperAdmin, async (req, res, next) => {
+router.post(
+  "/faqs",
+  requireAdmin,
+  requireAdminPermission("faqs"),
+  async (req, res, next) => {
   try {
     const parsed = parseFaqPayload(req.body, { partial: false });
     if (parsed.error) {
@@ -1073,7 +1207,7 @@ router.post("/faqs", requireAdmin, requireSuperAdmin, async (req, res, next) => 
 router.put(
   "/faqs/:id",
   requireAdmin,
-  requireSuperAdmin,
+  requireAdminPermission("faqs"),
   async (req, res, next) => {
   try {
     const id = Number(req.params.id);
@@ -1114,7 +1248,7 @@ router.put(
 router.delete(
   "/faqs/:id",
   requireAdmin,
-  requireSuperAdmin,
+  requireAdminPermission("faqs"),
   async (req, res, next) => {
   try {
     const id = Number(req.params.id);
