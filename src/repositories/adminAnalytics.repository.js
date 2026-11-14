@@ -160,7 +160,7 @@ export async function getRecentActivity({ limit = 25 } = {}) {
   return result.rows;
 }
 
-export async function listVisitors(query = {}) {
+async function listRegisteredUsers(query = {}) {
   const { page, limit, offset } = pagination(query);
   const fromIso = parseDateBound(query.from);
   const toIso = parseDateBound(query.to, true);
@@ -168,6 +168,98 @@ export async function listVisitors(query = {}) {
 
   const where = [];
   const params = [];
+
+  if (fromIso) {
+    params.push(fromIso);
+    where.push(
+      `COALESCE(v.last_seen_at, u.last_login_at, u.created_at) >= $${params.length}`,
+    );
+  }
+  if (toIso) {
+    params.push(toIso);
+    where.push(
+      `COALESCE(v.last_seen_at, u.last_login_at, u.created_at) <= $${params.length}`,
+    );
+  }
+  if (search) {
+    params.push(`%${search}%`);
+    const i = params.length;
+    where.push(
+      `(u.full_name ILIKE $${i}
+        OR u.email ILIKE $${i}
+        OR u.phone_e164 ILIKE $${i}
+        OR u.id::text ILIKE $${i}
+        OR v.id::text ILIKE $${i})`,
+    );
+  }
+
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const fromSql = `
+    FROM users u
+    LEFT JOIN LATERAL (
+      SELECT *
+      FROM visitors
+      WHERE user_id = u.id
+      ORDER BY last_seen_at DESC NULLS LAST
+      LIMIT 1
+    ) v ON TRUE
+  `;
+
+  const countRes = await getPool().query(
+    `SELECT COUNT(*)::int AS count ${fromSql} ${whereSql}`,
+    params,
+  );
+
+  const limitIdx = params.length + 1;
+  const offsetIdx = params.length + 2;
+  params.push(limit, offset);
+  const rows = await getPool().query(
+    `SELECT v.id, u.id AS user_id, v.user_number,
+            COALESCE(v.first_seen_at, u.created_at) AS first_seen_at,
+            COALESCE(v.last_seen_at, u.last_login_at, u.created_at) AS last_seen_at,
+            COALESCE(v.last_ip, u.last_ip, '') AS last_ip,
+            COALESCE(v.last_user_agent, '') AS last_user_agent,
+            COALESCE(NULLIF(v.last_city, ''), NULLIF(u.city, ''), NULLIF(u.ip_city, ''), '') AS last_city,
+            COALESCE(NULLIF(v.last_region, ''), NULLIF(u.region, ''), NULLIF(u.ip_region, ''), '') AS last_region,
+            COALESCE(NULLIF(v.last_country, ''), NULLIF(u.country, ''), NULLIF(u.ip_country, ''), '') AS last_country,
+            COALESCE(v.created_at, u.created_at) AS created_at,
+            u.full_name, u.email,
+            CASE
+              WHEN v.id IS NULL THEN 0
+              ELSE (SELECT COUNT(*)::int FROM assessments a WHERE a.visitor_id = v.id)
+            END AS assessment_count
+     ${fromSql}
+     ${whereSql}
+     ORDER BY COALESCE(v.last_seen_at, u.last_login_at, u.created_at) DESC
+     LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+    params,
+  );
+
+  return {
+    items: rows.rows,
+    page,
+    limit,
+    total: countRes.rows[0].count,
+  };
+}
+
+export async function listVisitors(query = {}) {
+  const kind = String(query.kind || "").trim().toLowerCase();
+  if (kind === "users") {
+    return listRegisteredUsers(query);
+  }
+
+  const { page, limit, offset } = pagination(query);
+  const fromIso = parseDateBound(query.from);
+  const toIso = parseDateBound(query.to, true);
+  const search = String(query.q || "").trim();
+
+  const where = [];
+  const params = [];
+
+  if (kind === "guests") {
+    where.push("v.user_id IS NULL");
+  }
 
   if (fromIso) {
     params.push(fromIso);
@@ -205,7 +297,7 @@ export async function listVisitors(query = {}) {
   const rows = await getPool().query(
     `SELECT v.id, v.user_id, v.user_number, v.first_seen_at, v.last_seen_at,
             v.last_ip, v.last_user_agent, v.last_city, v.last_region, v.last_country,
-            v.created_at,
+            v.created_at, NULL::text AS full_name, NULL::text AS email,
             (SELECT COUNT(*)::int FROM assessments a WHERE a.visitor_id = v.id) AS assessment_count
      FROM visitors v
      ${whereSql}
@@ -335,7 +427,15 @@ export async function listAssessments(query = {}) {
 }
 
 export async function listRequestIntros(query = {}) {
-  return listLeadTable("request_intros", query);
+  return listLeadTable("request_intros", query, {
+    searchColumns: [
+      "full_name",
+      "email",
+      "phone_number",
+      "installer_name",
+      "visitor_id::text",
+    ],
+  });
 }
 
 export async function listContactMessages(query = {}) {
@@ -343,7 +443,16 @@ export async function listContactMessages(query = {}) {
 }
 
 export async function listExpertReviews(query = {}) {
-  return listLeadTable("expert_reviews", query);
+  return listLeadTable("expert_reviews", query, {
+    searchColumns: [
+      "full_name",
+      "email",
+      "phone_number",
+      "installer_name",
+      "project_location",
+      "visitor_id::text",
+    ],
+  });
 }
 
 export async function listQuoteUploads(query = {}) {
@@ -417,10 +526,3 @@ async function listLeadTable(table, query = {}, options = {}) {
   return { items: rows.rows, page, limit, total: countRes.rows[0].count };
 }
 
-export async function getExpertReviewById(id) {
-  const result = await getPool().query(
-    `SELECT * FROM expert_reviews WHERE id = $1`,
-    [id],
-  );
-  return result.rows[0] ?? null;
-}

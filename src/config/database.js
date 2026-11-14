@@ -371,8 +371,24 @@ async function initSchema(db) {
   );
   await ensureColumn(db, "request_intros", "visitor_id", "UUID NULL");
   await ensureColumn(db, "request_intros", "session_id", "UUID NULL");
+  await ensureColumn(
+    db,
+    "request_intros",
+    "installer_name",
+    "VARCHAR(255) DEFAULT ''",
+  );
+  await ensureColumn(db, "request_intros", "installer_snapshot", "JSONB");
+  await ensureColumn(db, "request_intros", "assessment_id", "INTEGER NULL");
   await ensureColumn(db, "expert_reviews", "visitor_id", "UUID NULL");
   await ensureColumn(db, "expert_reviews", "session_id", "UUID NULL");
+  await ensureColumn(
+    db,
+    "expert_reviews",
+    "installer_name",
+    "VARCHAR(255) DEFAULT ''",
+  );
+  await ensureColumn(db, "expert_reviews", "installer_snapshot", "JSONB");
+  await ensureColumn(db, "expert_reviews", "assessment_id", "INTEGER NULL");
   await ensureColumn(
     db,
     "expert_reviews",

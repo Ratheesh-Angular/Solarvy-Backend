@@ -63,7 +63,6 @@ import {
   listExpertReviews,
   listQuoteUploads,
   listFinancingEnquiries,
-  getExpertReviewById,
 } from "../repositories/adminAnalytics.repository.js";
 import {
   FINANCING_STATUSES,
@@ -72,6 +71,8 @@ import {
   updateFinancingEnquiryReview,
 } from "../repositories/financingEnquiry.repository.js";
 import { getQuoteUploadById } from "../repositories/quoteUpload.repository.js";
+import { getExpertReviewById } from "../repositories/expertReview.repository.js";
+import { getRequestIntroById } from "../repositories/requestIntro.repository.js";
 import { resolveStoredPath } from "../services/fileStorage.service.js";
 import {
   formatAssessmentId,
@@ -93,6 +94,8 @@ function mapVisitorRow(row) {
     userId: row.user_id,
     userNumber: row.user_number ?? null,
     displayName: formatUserDisplayName(row.user_number),
+    fullName: row.full_name || null,
+    email: row.email || null,
     firstSeenAt: row.first_seen_at,
     lastSeenAt: row.last_seen_at,
     lastIp: row.last_ip,
@@ -123,6 +126,91 @@ function numberOrNull(value) {
   if (value === null || value === undefined) return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+function parseJsonObject(value) {
+  if (value == null) return null;
+  if (typeof value === "object" && !Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? parsed
+        : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function mapInstallerSnapshot(raw) {
+  const snap = parseJsonObject(raw);
+  if (!snap) return null;
+  return {
+    installerName: String(snap.installerName || snap.installer_name || "").trim() || null,
+    cardNumber: numberOrNull(snap.cardNumber ?? snap.card_number),
+    matchPct: numberOrNull(snap.matchPct ?? snap.match_pct),
+    matchTier: String(snap.matchTier || snap.match_tier || "").trim() || null,
+    bestSuitedFor:
+      String(snap.bestSuitedFor || snap.best_suited_for || "").trim() || null,
+    coverage: String(snap.coverage || "").trim() || null,
+    strengths: String(snap.strengths || "").trim() || null,
+    pricing: String(snap.pricing || "").trim() || null,
+    response: String(snap.response || "").trim() || null,
+  };
+}
+
+function mapRequestIntroRow(row) {
+  const snapshot = mapInstallerSnapshot(row.installer_snapshot);
+  return {
+    id: row.id,
+    fullName: row.full_name || "",
+    phoneNumber: row.phone_number || "",
+    email: row.email || "",
+    projectTimeline: row.project_timeline || "",
+    additionalNotes: row.additional_notes || "",
+    projectSummary: row.project_summary ?? null,
+    visitorId: row.visitor_id || null,
+    sessionId: row.session_id || null,
+    installerName: row.installer_name || snapshot?.installerName || "",
+    installerSnapshot: snapshot,
+    matchPct: snapshot?.matchPct ?? null,
+    assessmentId: row.assessment_id ?? null,
+    assessmentRef:
+      row.assessment_id != null ? formatAssessmentId(row.assessment_id) : null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapExpertReviewRow(row) {
+  const snapshot = mapInstallerSnapshot(row.installer_snapshot);
+  return {
+    id: row.id,
+    fullName: row.full_name || "",
+    phoneNumber: row.phone_number || "",
+    email: row.email || "",
+    projectLocation: row.project_location || "",
+    reviewType: row.review_type || "",
+    additionalNotes: row.additional_notes || "",
+    attachmentFileName: row.attachment_file_name || "",
+    storedFileName: row.stored_file_name || "",
+    mimeType: row.mime_type || "",
+    sizeBytes: numberOrNull(row.size_bytes) ?? 0,
+    storagePath: row.storage_path || "",
+    hasAttachment: Boolean(row.storage_path),
+    visitorId: row.visitor_id || null,
+    sessionId: row.session_id || null,
+    installerName: row.installer_name || snapshot?.installerName || "",
+    installerSnapshot: snapshot,
+    matchPct: snapshot?.matchPct ?? null,
+    assessmentId: row.assessment_id ?? null,
+    assessmentRef:
+      row.assessment_id != null ? formatAssessmentId(row.assessment_id) : null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
 function mapFinancingRow(row) {
@@ -455,7 +543,10 @@ router.get(
   async (req, res, next) => {
   try {
     const data = await listRequestIntros(req.query);
-    res.json({ success: true, data });
+    res.json({
+      success: true,
+      data: { ...data, items: data.items.map(mapRequestIntroRow) },
+    });
   } catch (error) {
     next(error);
   }
@@ -481,11 +572,86 @@ router.get(
   async (req, res, next) => {
   try {
     const data = await listExpertReviews(req.query);
-    res.json({ success: true, data });
+    res.json({
+      success: true,
+      data: { ...data, items: data.items.map(mapExpertReviewRow) },
+    });
   } catch (error) {
     next(error);
   }
 });
+
+async function loadRequestIntroForAdmin(req, res) {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) {
+    res.status(400).json({ success: false, message: "Invalid request intro id" });
+    return null;
+  }
+
+  const row = await getRequestIntroById(id);
+  const visitorId = String(req.query.visitorId || "").trim();
+  if (
+    !row ||
+    (visitorId && (!isUuid(visitorId) || row.visitor_id !== visitorId))
+  ) {
+    res
+      .status(404)
+      .json({ success: false, message: "Request intro not found" });
+    return null;
+  }
+  return row;
+}
+
+async function loadExpertReviewForAdmin(req, res) {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) {
+    res.status(400).json({ success: false, message: "Invalid expert review id" });
+    return null;
+  }
+
+  const row = await getExpertReviewById(id);
+  const visitorId = String(req.query.visitorId || "").trim();
+  if (
+    !row ||
+    (visitorId && (!isUuid(visitorId) || row.visitor_id !== visitorId))
+  ) {
+    res
+      .status(404)
+      .json({ success: false, message: "Expert review not found" });
+    return null;
+  }
+  return row;
+}
+
+router.get(
+  "/request-intros/:id",
+  requireAdmin,
+  requireAdminPermission("leads", "users"),
+  async (req, res, next) => {
+    try {
+      const row = await loadRequestIntroForAdmin(req, res);
+      if (!row) return;
+      res.json({ success: true, data: mapRequestIntroRow(row) });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.get(
+  "/expert-reviews/:id",
+  requireAdmin,
+  requireAdminPermission("leads", "users"),
+  async (req, res, next) => {
+    try {
+      const row = await loadExpertReviewForAdmin(req, res);
+      if (!row) return;
+      res.json({ success: true, data: mapExpertReviewRow(row) });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
 
 router.get(
   "/quote-uploads",

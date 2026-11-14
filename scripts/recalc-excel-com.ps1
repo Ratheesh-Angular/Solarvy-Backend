@@ -290,6 +290,13 @@ try {
     if ($null -ne $fmVals) { $fm.Value2 = $fmVals }
   } catch { }
 
+  # Same for installer shortlist so ExcelJS sees post-calc Match % / tier.
+  try {
+    $iro = $wb.Worksheets.Item("Installer_Results_Output").Range("A16:K30")
+    $iroVals = $iro.Value2
+    if ($null -ne $iroVals) { $iro.Value2 = $iroVals }
+  } catch { }
+
   try {
     $loadB4 = $wb.Worksheets.Item("Load_Estimation").Range("B4").Value2
     $loadB8 = $wb.Worksheets.Item("Load_Estimation").Range("B8").Value2
