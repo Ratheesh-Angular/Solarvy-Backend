@@ -1,6 +1,22 @@
-import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
+import { readFileSync } from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import {
+  SESClient,
+  SendEmailCommand,
+  SendRawEmailCommand,
+} from "@aws-sdk/client-ses";
+
+const LOGO_CID = "solarvy-logo";
+const LOGO_FALLBACK_URL = "https://www.solarvy.ng/email-logo.png";
+const LOGO_PATH = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../assets/email-logo.png",
+);
 
 let sesClient = null;
+let cachedLogoBase64 = null;
+let logoLoadAttempted = false;
 
 function getExplicitAwsCredentials() {
   const accessKeyId = process.env.AWS_ACCESS_KEY_ID?.trim();
@@ -36,19 +52,19 @@ function isAwsCredentialError(error) {
   );
 }
 
-function getEmailAssetBaseUrl() {
-  const override = process.env.EMAIL_ASSET_BASE_URL?.trim();
-  if (override) return override.replace(/\/$/, "");
-
-  const fromEnv = process.env.FRONTEND_URL || "";
-  const origins = fromEnv
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const httpsOrigin = origins.find((o) => /^https:\/\//i.test(o));
-  if (httpsOrigin) return httpsOrigin.replace(/\/$/, "");
-  if (origins[0]) return origins[0].replace(/\/$/, "");
-  return "https://solarvy.ng";
+function getLogoBase64() {
+  if (logoLoadAttempted) return cachedLogoBase64;
+  logoLoadAttempted = true;
+  try {
+    cachedLogoBase64 = readFileSync(LOGO_PATH).toString("base64");
+  } catch (error) {
+    console.warn(
+      `[email] Missing logo asset at ${LOGO_PATH}; falling back to remote URL`,
+      error?.message || error,
+    );
+    cachedLogoBase64 = null;
+  }
+  return cachedLogoBase64;
 }
 
 function buildOtpDigitCells(code) {
@@ -73,14 +89,13 @@ function buildOtpDigitCells(code) {
     .join("");
 }
 
-function buildOtpHtml({ code, purpose }) {
+function buildOtpHtml({ code, purpose, logoSrc }) {
   const action =
     purpose === "login"
       ? "log in to SolarVy"
       : "finish creating your SolarVy account";
   const title =
     purpose === "login" ? "Your login code" : "Verify your email";
-  const logoUrl = `${getEmailAssetBaseUrl()}/email-logo.png`;
   const digitCells = buildOtpDigitCells(code);
 
   return `<!DOCTYPE html>
@@ -100,7 +115,7 @@ function buildOtpHtml({ code, purpose }) {
           </tr>
           <tr>
             <td style="padding: 28px 28px 8px; text-align: center;">
-              <img src="${logoUrl}" alt="SolarVy" width="140" height="42" style="display: inline-block; max-width: 140px; height: auto; border: 0;" />
+              <img src="${logoSrc}" alt="SolarVy" width="140" height="42" style="display: inline-block; max-width: 140px; height: auto; border: 0;" />
             </td>
           </tr>
           <tr>
@@ -138,6 +153,70 @@ function buildOtpHtml({ code, purpose }) {
 </html>`;
 }
 
+function buildOtpText({ code, purpose }) {
+  return `SolarVy verification code: ${code}\n\nUse this code to ${
+    purpose === "login"
+      ? "log in to SolarVy"
+      : "finish creating your SolarVy account"
+  }. It expires in 10 minutes.\n\nIf you did not request this, you can ignore this email.\n\nhttps://solarvy.ng`;
+}
+
+function encodeSubject(subject) {
+  return `=?UTF-8?B?${Buffer.from(subject, "utf8").toString("base64")}?=`;
+}
+
+function chunkBase64(value) {
+  return value.replace(/.{1,76}/g, "$&\r\n").trim();
+}
+
+function buildRawOtpMime({
+  from,
+  to,
+  subject,
+  textBody,
+  htmlBody,
+  logoBase64,
+}) {
+  const altBoundary = `solarvy_alt_${Date.now()}`;
+  const relBoundary = `solarvy_rel_${Date.now()}`;
+
+  return [
+    `From: ${from}`,
+    `To: ${to}`,
+    `Subject: ${encodeSubject(subject)}`,
+    "MIME-Version: 1.0",
+    `Content-Type: multipart/alternative; boundary="${altBoundary}"`,
+    "",
+    `--${altBoundary}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    "Content-Transfer-Encoding: 7bit",
+    "",
+    textBody,
+    "",
+    `--${altBoundary}`,
+    `Content-Type: multipart/related; boundary="${relBoundary}"`,
+    "",
+    `--${relBoundary}`,
+    'Content-Type: text/html; charset="UTF-8"',
+    "Content-Transfer-Encoding: 7bit",
+    "",
+    htmlBody,
+    "",
+    `--${relBoundary}`,
+    "Content-Type: image/png; name=\"email-logo.png\"",
+    "Content-Transfer-Encoding: base64",
+    `Content-ID: <${LOGO_CID}>`,
+    'Content-Disposition: inline; filename="email-logo.png"',
+    "",
+    chunkBase64(logoBase64),
+    "",
+    `--${relBoundary}--`,
+    "",
+    `--${altBoundary}--`,
+    "",
+  ].join("\r\n");
+}
+
 /**
  * Send a 6-digit OTP via AWS SES.
  * In non-production, if SES is not configured (or AWS keys are missing),
@@ -171,27 +250,45 @@ export async function sendOtpEmail({ to, code, purpose }) {
   }
 
   const source = `${fromName} <${fromEmail}>`;
-  const command = new SendEmailCommand({
-    Source: source,
-    Destination: { ToAddresses: [to] },
-    Message: {
-      Subject: { Data: subject, Charset: "UTF-8" },
-      Body: {
-        Text: {
-          Data: `SolarVy verification code: ${code}\n\nUse this code to ${
-            purpose === "login"
-              ? "log in to SolarVy"
-              : "finish creating your SolarVy account"
-          }. It expires in 10 minutes.\n\nIf you did not request this, you can ignore this email.\n\nhttps://solarvy.ng`,
-          Charset: "UTF-8",
-        },
-        Html: {
-          Data: buildOtpHtml({ code, purpose }),
-          Charset: "UTF-8",
+  const textBody = buildOtpText({ code, purpose });
+  const logoBase64 = getLogoBase64();
+
+  let command;
+  if (logoBase64) {
+    const htmlBody = buildOtpHtml({
+      code,
+      purpose,
+      logoSrc: `cid:${LOGO_CID}`,
+    });
+    const rawMessage = buildRawOtpMime({
+      from: source,
+      to,
+      subject,
+      textBody,
+      htmlBody,
+      logoBase64,
+    });
+    command = new SendRawEmailCommand({
+      RawMessage: { Data: Buffer.from(rawMessage, "utf8") },
+    });
+  } else {
+    const htmlBody = buildOtpHtml({
+      code,
+      purpose,
+      logoSrc: LOGO_FALLBACK_URL,
+    });
+    command = new SendEmailCommand({
+      Source: source,
+      Destination: { ToAddresses: [to] },
+      Message: {
+        Subject: { Data: subject, Charset: "UTF-8" },
+        Body: {
+          Text: { Data: textBody, Charset: "UTF-8" },
+          Html: { Data: htmlBody, Charset: "UTF-8" },
         },
       },
-    },
-  });
+    });
+  }
 
   try {
     await getSesClient().send(command);
