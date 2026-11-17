@@ -317,54 +317,119 @@ export async function listVisitors(query = {}) {
 export async function getVisitorDetail(visitorId) {
   const pool = getPool();
   const visitorRes = await pool.query(
-    `SELECT * FROM visitors WHERE id = $1`,
+    `SELECT
+       v.id,
+       v.user_id,
+       v.user_number,
+       v.first_seen_at,
+       v.last_seen_at,
+       COALESCE(v.last_ip, u.last_ip, '') AS last_ip,
+       COALESCE(v.last_user_agent, '') AS last_user_agent,
+       COALESCE(
+         NULLIF(v.last_city, ''),
+         NULLIF(u.city, ''),
+         NULLIF(u.ip_city, ''),
+         ''
+       ) AS last_city,
+       COALESCE(
+         NULLIF(v.last_region, ''),
+         NULLIF(u.region, ''),
+         NULLIF(u.ip_region, ''),
+         ''
+       ) AS last_region,
+       COALESCE(
+         NULLIF(v.last_country, ''),
+         NULLIF(u.country, ''),
+         NULLIF(u.ip_country, ''),
+         ''
+       ) AS last_country,
+       v.created_at,
+       u.full_name,
+       u.email,
+       COALESCE(NULLIF(u.phone_e164, ''), '') AS phone_e164
+     FROM visitors v
+     LEFT JOIN users u ON u.id = v.user_id
+     WHERE v.id = $1`,
     [visitorId],
   );
   const visitor = visitorRes.rows[0];
   if (!visitor) return null;
 
-  const [sessions, events, assessments, requestIntros, expertReviews, quoteUploads] =
-    await Promise.all([
-      pool.query(
-        `SELECT * FROM visitor_sessions
-         WHERE visitor_id = $1
-         ORDER BY started_at DESC
-         LIMIT 50`,
-        [visitorId],
-      ),
-      pool.query(
-        `SELECT * FROM activity_events
-         WHERE visitor_id = $1
-         ORDER BY created_at DESC
-         LIMIT 200`,
-        [visitorId],
-      ),
-      pool.query(
-        `SELECT id, draft_id, form_data, results, created_at, updated_at, visitor_id, session_id
-         FROM assessments
-         WHERE visitor_id = $1
-         ORDER BY created_at DESC`,
-        [visitorId],
-      ),
-      pool.query(
-        `SELECT * FROM request_intros
-         WHERE visitor_id = $1
-         ORDER BY created_at DESC`,
-        [visitorId],
-      ),
-      pool.query(
-        `SELECT * FROM expert_reviews
-         WHERE visitor_id = $1
-         ORDER BY created_at DESC`,
-        [visitorId],
-      ),
-      pool.query(
-        `SELECT * FROM quote_uploads
-         WHERE visitor_id = $1
-         ORDER BY created_at DESC`,
-        [visitorId],
-      ),
-    ]);
+  const [
+    sessions,
+    events,
+    assessments,
+    requestIntros,
+    expertReviews,
+    quoteUploads,
+    leadPhone,
+  ] = await Promise.all([
+    pool.query(
+      `SELECT * FROM visitor_sessions
+       WHERE visitor_id = $1
+       ORDER BY started_at DESC
+       LIMIT 50`,
+      [visitorId],
+    ),
+    pool.query(
+      `SELECT * FROM activity_events
+       WHERE visitor_id = $1
+       ORDER BY created_at DESC
+       LIMIT 200`,
+      [visitorId],
+    ),
+    pool.query(
+      `SELECT id, draft_id, form_data, results, created_at, updated_at, visitor_id, session_id
+       FROM assessments
+       WHERE visitor_id = $1
+       ORDER BY created_at DESC`,
+      [visitorId],
+    ),
+    pool.query(
+      `SELECT * FROM request_intros
+       WHERE visitor_id = $1
+       ORDER BY created_at DESC`,
+      [visitorId],
+    ),
+    pool.query(
+      `SELECT * FROM expert_reviews
+       WHERE visitor_id = $1
+       ORDER BY created_at DESC`,
+      [visitorId],
+    ),
+    pool.query(
+      `SELECT * FROM quote_uploads
+       WHERE visitor_id = $1
+       ORDER BY created_at DESC`,
+      [visitorId],
+    ),
+    pool.query(
+      `SELECT phone FROM (
+         SELECT phone_number AS phone, created_at
+         FROM request_intros
+         WHERE visitor_id = $1 AND NULLIF(TRIM(phone_number), '') IS NOT NULL
+         UNION ALL
+         SELECT phone_number AS phone, created_at
+         FROM expert_reviews
+         WHERE visitor_id = $1 AND NULLIF(TRIM(phone_number), '') IS NOT NULL
+         UNION ALL
+         SELECT phone_number AS phone, created_at
+         FROM quote_uploads
+         WHERE visitor_id = $1 AND NULLIF(TRIM(phone_number), '') IS NOT NULL
+         UNION ALL
+         SELECT contact_phone AS phone, created_at
+         FROM financing_enquiries
+         WHERE visitor_id = $1 AND NULLIF(TRIM(contact_phone), '') IS NOT NULL
+       ) phones
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [visitorId],
+    ),
+  ]);
+
+  const accountPhone = String(visitor.phone_e164 || "").trim();
+  const resolvedLeadPhone = String(leadPhone.rows[0]?.phone || "").trim();
+  visitor.phone_e164 = accountPhone || resolvedLeadPhone || "";
 
   return {
     visitor,

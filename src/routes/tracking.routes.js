@@ -13,6 +13,7 @@ import {
   getVisitorIdFromRequest,
   getSessionIdFromRequest,
 } from "../utils/requestMeta.js";
+import { lookupIpGeolocation } from "../services/ipGeolocation.service.js";
 
 const router = Router();
 
@@ -23,6 +24,16 @@ router.post("/session", async (req, res, next) => {
     const ip = getClientIp(req);
     const userAgent = getUserAgent(req);
 
+    let city = req.body?.city || "";
+    let region = req.body?.region || "";
+    let country = req.body?.country || "";
+    if (!city && !region && !country) {
+      const geo = await lookupIpGeolocation(ip);
+      city = geo.city || "";
+      region = geo.region || "";
+      country = geo.country || "";
+    }
+
     const result = await upsertVisitorAndSession({
       visitorId,
       sessionId,
@@ -30,9 +41,9 @@ router.post("/session", async (req, res, next) => {
       userAgent,
       landingPath: req.body?.landingPath || req.body?.path || "",
       referrer: req.body?.referrer || "",
-      city: req.body?.city || "",
-      region: req.body?.region || "",
-      country: req.body?.country || "",
+      city,
+      region,
+      country,
     });
 
     res.json({

@@ -147,3 +147,20 @@ export function resolveStoredPath(storagePath) {
   }
   return absolute;
 }
+
+/**
+ * Best-effort delete of a file under uploads/. Missing files are ignored.
+ * @param {string} storagePath
+ * @returns {Promise<boolean>} true if a file was removed
+ */
+export async function deleteStoredFile(storagePath) {
+  const absolute = resolveStoredPath(storagePath);
+  if (!absolute) return false;
+  try {
+    await fs.unlink(absolute);
+    return true;
+  } catch (error) {
+    if (error && error.code === "ENOENT") return false;
+    throw error;
+  }
+}

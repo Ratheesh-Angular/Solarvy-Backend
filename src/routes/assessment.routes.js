@@ -332,6 +332,64 @@ router.post("/:id/quick-snapshot-recommendation", async (req, res, next) => {
   }
 });
 
+router.post("/:id/recalculate", async (req, res, next) => {
+  try {
+    const assessmentId = parseAssessmentIdParam(req.params.id);
+    if (!Number.isFinite(assessmentId)) {
+      res.status(400).json({ success: false, message: "Invalid assessment id" });
+      return;
+    }
+
+    const assessment = await getAssessmentById(assessmentId);
+
+    if (!assessment) {
+      res.status(404).json({ success: false, message: "Assessment not found" });
+      return;
+    }
+
+    const fresh = await runExcelCalculation(assessment.form_data);
+    if (fresh?.calculationError) {
+      res.status(503).json({
+        success: false,
+        message: "Excel recalculation failed",
+        data: { calculationError: fresh.calculationError },
+      });
+      return;
+    }
+
+    const existing =
+      assessment.results && typeof assessment.results === "object"
+        ? assessment.results
+        : {};
+    const merged = {
+      ...fresh,
+    };
+    if (existing.aiRecommendation) {
+      merged.aiRecommendation = existing.aiRecommendation;
+    }
+    if (existing.quickSnapshotRecommendation) {
+      merged.quickSnapshotRecommendation = existing.quickSnapshotRecommendation;
+    }
+
+    const updated = await updateAssessmentResults(assessment.id, merged);
+
+    res.json({
+      success: true,
+      message: "Assessment recalculated",
+      data: {
+        id: formatAssessmentId(updated.id),
+        draftId: updated.draft_id,
+        formData: updated.form_data,
+        results: updated.results,
+        createdAt: updated.created_at,
+        updatedAt: updated.updated_at,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get("/:id", async (req, res, next) => {
   try {
     const assessmentId = parseAssessmentIdParam(req.params.id);

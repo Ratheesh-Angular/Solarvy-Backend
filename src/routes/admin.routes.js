@@ -75,6 +75,10 @@ import { getExpertReviewById } from "../repositories/expertReview.repository.js"
 import { getRequestIntroById } from "../repositories/requestIntro.repository.js";
 import { resolveStoredPath } from "../services/fileStorage.service.js";
 import {
+  clearDataCategory,
+  getDataManagementCounts,
+} from "../repositories/dataManagement.repository.js";
+import {
   formatAssessmentId,
   parseAssessmentIdParam,
 } from "../utils/assessmentId.js";
@@ -96,6 +100,7 @@ function mapVisitorRow(row) {
     displayName: formatUserDisplayName(row.user_number),
     fullName: row.full_name || null,
     email: row.email || null,
+    phoneNumber: row.phone_e164 || row.phone_number || null,
     firstSeenAt: row.first_seen_at,
     lastSeenAt: row.last_seen_at,
     lastIp: row.last_ip,
@@ -355,6 +360,42 @@ router.delete(
   async (req, res, next) => {
     try {
       const data = await removeStaffUser(req.params.id);
+      res.json({ success: true, data });
+    } catch (error) {
+      if (error.status) {
+        res.status(error.status).json({
+          success: false,
+          message: error.message,
+        });
+        return;
+      }
+      next(error);
+    }
+  },
+);
+
+router.get(
+  "/data-management/counts",
+  requireAdmin,
+  requireSuperAdmin,
+  async (_req, res, next) => {
+    try {
+      const counts = await getDataManagementCounts();
+      res.json({ success: true, data: counts });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.post(
+  "/data-management/clear",
+  requireAdmin,
+  requireSuperAdmin,
+  async (req, res, next) => {
+    try {
+      const category = String(req.body?.category || "").trim();
+      const data = await clearDataCategory(category);
       res.json({ success: true, data });
     } catch (error) {
       if (error.status) {

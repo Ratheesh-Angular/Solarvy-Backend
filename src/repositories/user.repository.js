@@ -150,15 +150,21 @@ export async function updateUserProfile(id, fields) {
   return mapUser(result.rows[0]);
 }
 
-export async function touchUserLogin(id, { lastIp = "" } = {}) {
+export async function touchUserLogin(
+  id,
+  { lastIp = "", ipCountry = "", ipRegion = "", ipCity = "" } = {},
+) {
   const result = await getPool().query(
     `UPDATE users
      SET last_login_at = NOW(),
          last_ip = CASE WHEN $2 <> '' THEN $2 ELSE last_ip END,
+         ip_country = CASE WHEN $3 <> '' THEN $3 ELSE ip_country END,
+         ip_region = CASE WHEN $4 <> '' THEN $4 ELSE ip_region END,
+         ip_city = CASE WHEN $5 <> '' THEN $5 ELSE ip_city END,
          updated_at = NOW()
      WHERE id = $1
      RETURNING *`,
-    [id, lastIp],
+    [id, lastIp, ipCountry, ipRegion, ipCity],
   );
   return mapUser(result.rows[0]);
 }

@@ -7,6 +7,7 @@ import {
   getVisitorIdFromRequest,
   getSessionIdFromRequest,
 } from "../utils/requestMeta.js";
+import { lookupIpGeolocation } from "../services/ipGeolocation.service.js";
 
 /**
  * Resolve visitor/session from request headers, creating rows when needed
@@ -23,6 +24,7 @@ export async function resolveVisitorContext(req) {
   }
 
   try {
+    const geo = await lookupIpGeolocation(ip);
     const result = await upsertVisitorAndSession({
       visitorId,
       sessionId,
@@ -30,6 +32,9 @@ export async function resolveVisitorContext(req) {
       userAgent,
       landingPath: req.body?.landingPath || "",
       referrer: "",
+      city: geo.city || "",
+      region: geo.region || "",
+      country: geo.country || "",
     });
     return {
       visitorId: result.visitorId,

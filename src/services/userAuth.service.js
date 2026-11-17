@@ -59,12 +59,15 @@ async function linkVisitorToUser(req, userId) {
   const visitorId = getVisitorIdFromRequest(req);
   if (!visitorId || !isUuid(userId)) return;
 
-  const ip = getClientIp(req);
+  const geo = await geoForRequest(req);
   await upsertVisitorAndSession({
     visitorId,
     sessionId: null,
-    ip,
+    ip: geo.ip,
     userAgent: String(req.headers["user-agent"] || ""),
+    city: geo.city || "",
+    region: geo.region || "",
+    country: geo.country || "",
   });
 
   await getPool().query(
@@ -313,8 +316,13 @@ export async function verifyLoginOtp(req, { email, code }) {
   }
 
   await consumeOtp(otp.id);
-  const ip = getClientIp(req);
-  const updated = await touchUserLogin(user.id, { lastIp: ip });
+  const geo = await geoForRequest(req);
+  const updated = await touchUserLogin(user.id, {
+    lastIp: geo.ip,
+    ipCountry: geo.ipCountry || "",
+    ipRegion: geo.ipRegion || "",
+    ipCity: geo.ipCity || "",
+  });
   await linkVisitorToUser(req, user.id);
   return issueUserToken(updated || user);
 }
