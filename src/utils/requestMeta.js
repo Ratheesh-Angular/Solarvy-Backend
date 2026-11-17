@@ -8,10 +8,16 @@ export function isUuid(value) {
 }
 
 export function getClientIp(req) {
+  const cfConnectingIp = req.headers["cf-connecting-ip"];
+  if (typeof cfConnectingIp === "string" && cfConnectingIp.trim()) {
+    return cfConnectingIp.trim().slice(0, 64);
+  }
+
   const forwarded = req.headers["x-forwarded-for"];
   if (typeof forwarded === "string" && forwarded.trim()) {
     return forwarded.split(",")[0].trim().slice(0, 64);
   }
+
   return String(req.ip || req.socket?.remoteAddress || "").slice(0, 64);
 }
 
