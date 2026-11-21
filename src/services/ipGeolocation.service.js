@@ -54,6 +54,16 @@ function hasLocation(data) {
   return Boolean(data?.country || data?.region || data?.city);
 }
 
+/** Prefer full region names over two-letter codes when the API exposes both. */
+function pickRegionName(region, regionName, regionCode) {
+  const primary = String(region || "").trim();
+  const fullName = String(regionName || "").trim();
+  const code = String(regionCode || "").trim();
+  if (primary.length > 2) return primary;
+  if (fullName.length > 2) return fullName;
+  return primary || code;
+}
+
 async function fetchJson(url) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), LOOKUP_TIMEOUT_MS);
@@ -95,7 +105,7 @@ async function lookupPrimary(ip) {
     }
     return normalizeGeo({
       country: json.country_name || json.country,
-      region: json.region || json.region_code,
+      region: pickRegionName(json.region, json.regionName, json.region_code),
       city: json.city,
       latitude: json.latitude,
       longitude: json.longitude,
@@ -108,7 +118,7 @@ async function lookupPrimary(ip) {
   }
   return normalizeGeo({
     country: json.country || json.country_name,
-    region: json.region || json.regionName,
+    region: pickRegionName(json.region, json.regionName, json.region_code),
     city: json.city,
     latitude: json.latitude ?? json.lat,
     longitude: json.longitude ?? json.lon,

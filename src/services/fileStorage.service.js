@@ -33,13 +33,8 @@ export function getUploadsRoot() {
   return UPLOADS_ROOT;
 }
 
-export async function ensureUploadDirs() {
-  await fs.mkdir(path.join(UPLOADS_ROOT, "expert-reviews"), { recursive: true });
-  await fs.mkdir(path.join(UPLOADS_ROOT, "quote-uploads"), { recursive: true });
-  await fs.mkdir(path.join(UPLOADS_ROOT, BLOG_IMAGES_FOLDER), { recursive: true });
-}
-
 export const BLOG_IMAGES_FOLDER = "blog-images";
+export const AVATARS_FOLDER = "avatars";
 
 const BLOG_IMAGE_TYPES = new Map([
   ["image/jpeg", ".jpg"],
@@ -48,8 +43,27 @@ const BLOG_IMAGE_TYPES = new Map([
   ["image/gif", ".gif"],
 ]);
 
+const AVATAR_IMAGE_TYPES = new Map([
+  ["image/jpeg", ".jpg"],
+  ["image/png", ".png"],
+  ["image/webp", ".webp"],
+]);
+
+export const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+
+export async function ensureUploadDirs() {
+  await fs.mkdir(path.join(UPLOADS_ROOT, "expert-reviews"), { recursive: true });
+  await fs.mkdir(path.join(UPLOADS_ROOT, "quote-uploads"), { recursive: true });
+  await fs.mkdir(path.join(UPLOADS_ROOT, BLOG_IMAGES_FOLDER), { recursive: true });
+  await fs.mkdir(path.join(UPLOADS_ROOT, AVATARS_FOLDER), { recursive: true });
+}
+
 export function getBlogImagesDir() {
   return path.join(UPLOADS_ROOT, BLOG_IMAGES_FOLDER);
+}
+
+export function getAvatarsDir() {
+  return path.join(UPLOADS_ROOT, AVATARS_FOLDER);
 }
 
 /**
@@ -75,6 +89,36 @@ export async function saveBlogImage(file) {
     mimeType,
     sizeBytes: file.size ?? file.buffer.length,
     storagePath: `${BLOG_IMAGES_FOLDER}/${storedName}`,
+  };
+}
+
+/**
+ * Persist a user avatar under uploads/avatars/.
+ * JPG / PNG / WebP only, max 2MB.
+ */
+export async function saveAvatar(file) {
+  if (!file?.buffer?.length) {
+    throw new Error("No file uploaded");
+  }
+  const sizeBytes = file.size ?? file.buffer.length;
+  if (sizeBytes > AVATAR_MAX_BYTES) {
+    throw new Error("Image must be 2MB or smaller");
+  }
+  const mimeType = String(file.mimetype || "").toLowerCase();
+  const ext = AVATAR_IMAGE_TYPES.get(mimeType);
+  if (!ext) {
+    throw new Error("Unsupported image type. Allowed: JPG, PNG, WebP.");
+  }
+
+  await fs.mkdir(getAvatarsDir(), { recursive: true });
+  const storedName = `${randomUUID()}${ext}`;
+  await fs.writeFile(path.join(getAvatarsDir(), storedName), file.buffer);
+
+  return {
+    storedName,
+    mimeType,
+    sizeBytes,
+    storagePath: `${AVATARS_FOLDER}/${storedName}`,
   };
 }
 

@@ -13,6 +13,7 @@ import {
   parseAssessmentIdParam,
 } from "../utils/assessmentId.js";
 import { normalizeNigeriaPhone } from "../utils/phone.js";
+import { sendFinancingConfirmationEmail } from "../services/email.service.js";
 
 const router = Router();
 
@@ -118,6 +119,16 @@ router.post("/", validateFinancingEnquiry, async (req, res, next) => {
       },
       ip,
       userAgent,
+    }).catch(() => {});
+
+    await sendFinancingConfirmationEmail({
+      to: clip(body.contactEmail, 255).toLowerCase(),
+      fullName: clip(body.contactFullName, 255),
+      reference: submission.reference,
+      partnerName: partnerSnapshot.name,
+      routeLabel: clip(body.routeLabel, 160),
+      assessmentRef: assessment?.id ? formatAssessmentId(assessment.id) : "",
+      amountToFinance: Number(body.amountToFinance),
     }).catch(() => {});
 
     res.status(201).json({

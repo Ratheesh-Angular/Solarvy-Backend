@@ -17,6 +17,32 @@ import { lookupIpGeolocation } from "../services/ipGeolocation.service.js";
 
 const router = Router();
 
+function countryCodeFromName(country) {
+  const name = String(country || "").trim();
+  if (/^nigeria$/i.test(name)) return "NG";
+  return "";
+}
+
+router.get("/geo", async (req, res, next) => {
+  try {
+    const ip = getClientIp(req);
+    const geo = await lookupIpGeolocation(ip);
+    res.json({
+      success: true,
+      data: {
+        country: geo.country || "",
+        region: geo.region || "",
+        city: geo.city || "",
+        latitude: geo.latitude,
+        longitude: geo.longitude,
+        countryCode: countryCodeFromName(geo.country),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.post("/session", async (req, res, next) => {
   try {
     const visitorId = getVisitorIdFromRequest(req);

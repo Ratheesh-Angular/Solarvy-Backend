@@ -34,3 +34,20 @@ export async function getRequestIntroById(id) {
   );
   return result.rows[0] ?? null;
 }
+
+export async function updateRequestIntroReview(id, { status, adminNotes }) {
+  const result = await getPool().query(
+    `UPDATE request_intros
+     SET status = COALESCE($2::text, status),
+         admin_notes = COALESCE($3::text, admin_notes),
+         status_updated_at = CASE
+           WHEN $2::text IS NOT NULL AND $2::text <> status THEN NOW()
+           ELSE status_updated_at
+         END,
+         updated_at = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [id, status ?? null, adminNotes ?? null],
+  );
+  return result.rows[0] ?? null;
+}

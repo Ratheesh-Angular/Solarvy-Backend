@@ -4,7 +4,9 @@ import { createQuoteUpload } from "../repositories/quoteUpload.repository.js";
 import { createActivityEvent } from "../repositories/activity.repository.js";
 import { saveUpload } from "../services/fileStorage.service.js";
 import { resolveVisitorContext } from "../utils/resolveVisitorContext.js";
-import { parseAssessmentIdParam } from "../utils/assessmentId.js";
+import { formatAssessmentId, parseAssessmentIdParam } from "../utils/assessmentId.js";
+import { sendQuoteUploadConfirmationEmail } from "../services/email.service.js";
+import { isValidEmail } from "../utils/phone.js";
 
 const router = Router();
 
@@ -65,6 +67,17 @@ router.post("/", upload.single("file"), async (req, res, next) => {
       ip,
       userAgent,
     });
+
+    const normalizedEmail = String(req.body?.email || "").trim().toLowerCase();
+    if (isValidEmail(normalizedEmail)) {
+      await sendQuoteUploadConfirmationEmail({
+        to: normalizedEmail,
+        fullName: String(req.body?.fullName || "").trim(),
+        fileName: saved.originalName,
+        assessmentRef: assessmentId ? formatAssessmentId(assessmentId) : "",
+        location: String(req.body?.location || "").trim(),
+      }).catch(() => {});
+    }
 
     res.status(201).json({
       success: true,

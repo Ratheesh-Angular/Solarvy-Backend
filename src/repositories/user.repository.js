@@ -20,6 +20,7 @@ function mapUser(row) {
     ipRegion: row.ip_region,
     ipCity: row.ip_city,
     lastIp: row.last_ip,
+    avatarUrl: row.avatar_url || "",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastLoginAt: row.last_login_at,
@@ -169,7 +170,60 @@ export async function touchUserLogin(
   return mapUser(result.rows[0]);
 }
 
-export function toPublicUser(user) {
+export async function updateAccountProfile(
+  id,
+  { fullName, phoneE164, country = "", region = "", city = "" },
+) {
+  const result = await getPool().query(
+    `UPDATE users SET
+       full_name = $2,
+       phone_e164 = $3,
+       country = $4,
+       region = $5,
+       city = $6,
+       updated_at = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [
+      id,
+      String(fullName || "").trim(),
+      String(phoneE164 || "").trim(),
+      String(country || "").trim(),
+      String(region || "").trim(),
+      String(city || "").trim(),
+    ],
+  );
+  return mapUser(result.rows[0]);
+}
+
+export async function setUserAvatar(id, avatarUrl) {
+  const result = await getPool().query(
+    `UPDATE users SET
+       avatar_url = $2,
+       updated_at = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [id, String(avatarUrl || "").trim()],
+  );
+  return mapUser(result.rows[0]);
+}
+
+/**
+ * Build a public avatar URL from a stored relative path (avatars/…).
+ * Pass apiOrigin (e.g. https://api.example.com) when available.
+ */
+export function buildAvatarPublicUrl(storagePath, apiOrigin = "") {
+  const stored = String(storagePath || "").trim();
+  if (!stored) return "";
+  if (/^https?:\/\//i.test(stored)) return stored;
+  const base = String(apiOrigin || "").replace(/\/$/, "");
+  const path = stored.startsWith("api/uploads/")
+    ? `/${stored}`
+    : `/api/uploads/${stored.replace(/^\//, "")}`;
+  return base ? `${base}${path}` : path;
+}
+
+export function toPublicUser(user, { apiOrigin } = {}) {
   if (!user) return null;
   return {
     id: user.id,
@@ -177,5 +231,9 @@ export function toPublicUser(user) {
     email: user.email,
     phoneE164: user.phoneE164,
     authProvider: user.authProvider,
+    country: user.country || user.ipCountry || "",
+    region: user.region || user.ipRegion || "",
+    city: user.city || user.ipCity || "",
+    avatarUrl: buildAvatarPublicUrl(user.avatarUrl, apiOrigin),
   };
 }

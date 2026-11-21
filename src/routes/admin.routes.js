@@ -70,10 +70,30 @@ import {
   getFinancingEnquiryById,
   updateFinancingEnquiryReview,
 } from "../repositories/financingEnquiry.repository.js";
-import { getQuoteUploadById } from "../repositories/quoteUpload.repository.js";
-import { getExpertReviewById } from "../repositories/expertReview.repository.js";
-import { getRequestIntroById } from "../repositories/requestIntro.repository.js";
+import {
+  getQuoteUploadById,
+  updateQuoteUploadReview,
+} from "../repositories/quoteUpload.repository.js";
+import {
+  getExpertReviewById,
+  updateExpertReviewReview,
+} from "../repositories/expertReview.repository.js";
+import {
+  getRequestIntroById,
+  updateRequestIntroReview,
+} from "../repositories/requestIntro.repository.js";
 import { resolveStoredPath } from "../services/fileStorage.service.js";
+import {
+  sendFinancingStatusUpdateEmail,
+  sendRequestIntroStatusUpdateEmail,
+  sendExpertReviewStatusUpdateEmail,
+  sendQuoteUploadStatusUpdateEmail,
+} from "../services/email.service.js";
+import {
+  PROJECT_ACTION_STATUSES,
+  normalizeProjectActionStatus,
+  projectActionStatusEmailLabel,
+} from "../utils/projectActionStatus.js";
 import {
   clearDataCategory,
   getDataManagementCounts,
@@ -86,6 +106,15 @@ import { getAssessmentById } from "../repositories/assessment.repository.js";
 import { isUuid } from "../utils/requestMeta.js";
 
 const router = Router();
+
+const FINANCING_STATUS_EMAIL_LABELS = {
+  enquiry_submitted: "Enquiry submitted",
+  provider_review: "Provider review",
+  additional_information: "Additional information needed",
+  offer_decision: "Offer / decision",
+  customer_decision: "Customer decision",
+  closed: "Closed",
+};
 
 function formatUserDisplayName(userNumber) {
   if (userNumber == null || !Number.isFinite(Number(userNumber))) return null;
@@ -184,6 +213,9 @@ function mapRequestIntroRow(row) {
     assessmentId: row.assessment_id ?? null,
     assessmentRef:
       row.assessment_id != null ? formatAssessmentId(row.assessment_id) : null,
+    status: normalizeProjectActionStatus(row.status),
+    adminNotes: row.admin_notes || "",
+    statusUpdatedAt: row.status_updated_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -213,6 +245,36 @@ function mapExpertReviewRow(row) {
     assessmentId: row.assessment_id ?? null,
     assessmentRef:
       row.assessment_id != null ? formatAssessmentId(row.assessment_id) : null,
+    status: normalizeProjectActionStatus(row.status),
+    adminNotes: row.admin_notes || "",
+    statusUpdatedAt: row.status_updated_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapQuoteUploadRow(row) {
+  return {
+    id: row.id,
+    fullName: row.full_name || "",
+    email: row.email || "",
+    phoneNumber: row.phone_number || "",
+    location: row.location || "",
+    additionalNotes: row.additional_notes || "",
+    originalName: row.original_name || "",
+    storedName: row.stored_name || "",
+    mimeType: row.mime_type || "",
+    sizeBytes: numberOrNull(row.size_bytes) ?? 0,
+    storagePath: row.storage_path || "",
+    hasAttachment: Boolean(row.storage_path),
+    visitorId: row.visitor_id || null,
+    sessionId: row.session_id || null,
+    assessmentId: row.assessment_id ?? null,
+    assessmentRef:
+      row.assessment_id != null ? formatAssessmentId(row.assessment_id) : null,
+    status: normalizeProjectActionStatus(row.status),
+    adminNotes: row.admin_notes || "",
+    statusUpdatedAt: row.status_updated_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -664,6 +726,63 @@ async function loadExpertReviewForAdmin(req, res) {
   return row;
 }
 
+async function loadQuoteUploadForAdmin(req, res) {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) {
+    res.status(400).json({ success: false, message: "Invalid quote upload id" });
+    return null;
+  }
+
+  const row = await getQuoteUploadById(id);
+  const visitorId = String(req.query.visitorId || "").trim();
+  if (
+    !row ||
+    (visitorId && (!isUuid(visitorId) || row.visitor_id !== visitorId))
+  ) {
+    res.status(404).json({ success: false, message: "Quote upload not found" });
+    return null;
+  }
+  return row;
+}
+
+const ACTION_NOTES_MAX_LEN = 5_000;
+
+/**
+ * Validate a project-action status/notes update body.
+ * Returns null (after sending an error response) on invalid input.
+ */
+function parseActionUpdateBody(req, res) {
+  const { status, adminNotes } = req.body ?? {};
+
+  let nextStatus;
+  if (status !== undefined) {
+    if (!PROJECT_ACTION_STATUSES.includes(status)) {
+      res.status(400).json({ success: false, message: "Invalid status" });
+      return null;
+    }
+    nextStatus = normalizeProjectActionStatus(status);
+  }
+
+  if (adminNotes !== undefined) {
+    if (typeof adminNotes !== "string") {
+      res.status(400).json({ success: false, message: "Notes must be text" });
+      return null;
+    }
+    if (adminNotes.length > ACTION_NOTES_MAX_LEN) {
+      res.status(400).json({
+        success: false,
+        message: `Notes must be at most ${ACTION_NOTES_MAX_LEN} characters`,
+      });
+      return null;
+    }
+  }
+
+  return {
+    status: nextStatus,
+    adminNotes: adminNotes === undefined ? undefined : adminNotes.trim(),
+  };
+}
+
 router.get(
   "/request-intros/:id",
   requireAdmin,
@@ -673,6 +792,47 @@ router.get(
       const row = await loadRequestIntroForAdmin(req, res);
       if (!row) return;
       res.json({ success: true, data: mapRequestIntroRow(row) });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.patch(
+  "/request-intros/:id",
+  requireAdmin,
+  requireAdminPermission("leads", "users"),
+  async (req, res, next) => {
+    try {
+      const row = await loadRequestIntroForAdmin(req, res);
+      if (!row) return;
+
+      const parsed = parseActionUpdateBody(req, res);
+      if (!parsed) return;
+
+      const updated = await updateRequestIntroReview(row.id, parsed);
+
+      if (
+        parsed.status &&
+        parsed.status !== normalizeProjectActionStatus(row.status) &&
+        String(updated?.email || "").trim()
+      ) {
+        await sendRequestIntroStatusUpdateEmail({
+          to: String(updated.email).trim().toLowerCase(),
+          fullName: String(updated.full_name || "").trim(),
+          installerName: String(updated.installer_name || "").trim(),
+          assessmentRef: updated.assessment_id
+            ? formatAssessmentId(updated.assessment_id)
+            : "",
+          statusLabel: projectActionStatusEmailLabel(parsed.status),
+        }).catch(() => {});
+      }
+
+      res.json({
+        success: true,
+        message: "Request intro updated",
+        data: mapRequestIntroRow(updated),
+      });
     } catch (error) {
       next(error);
     }
@@ -694,6 +854,47 @@ router.get(
   },
 );
 
+router.patch(
+  "/expert-reviews/:id",
+  requireAdmin,
+  requireAdminPermission("leads", "users"),
+  async (req, res, next) => {
+    try {
+      const row = await loadExpertReviewForAdmin(req, res);
+      if (!row) return;
+
+      const parsed = parseActionUpdateBody(req, res);
+      if (!parsed) return;
+
+      const updated = await updateExpertReviewReview(row.id, parsed);
+
+      if (
+        parsed.status &&
+        parsed.status !== normalizeProjectActionStatus(row.status) &&
+        String(updated?.email || "").trim()
+      ) {
+        await sendExpertReviewStatusUpdateEmail({
+          to: String(updated.email).trim().toLowerCase(),
+          fullName: String(updated.full_name || "").trim(),
+          installerName: String(updated.installer_name || "").trim(),
+          assessmentRef: updated.assessment_id
+            ? formatAssessmentId(updated.assessment_id)
+            : "",
+          statusLabel: projectActionStatusEmailLabel(parsed.status),
+        }).catch(() => {});
+      }
+
+      res.json({
+        success: true,
+        message: "Expert review updated",
+        data: mapExpertReviewRow(updated),
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
 router.get(
   "/quote-uploads",
   requireAdmin,
@@ -706,6 +907,62 @@ router.get(
     next(error);
   }
 });
+
+router.get(
+  "/quote-uploads/:id",
+  requireAdmin,
+  requireAdminPermission("leads", "users"),
+  async (req, res, next) => {
+    try {
+      const row = await loadQuoteUploadForAdmin(req, res);
+      if (!row) return;
+      res.json({ success: true, data: mapQuoteUploadRow(row) });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.patch(
+  "/quote-uploads/:id",
+  requireAdmin,
+  requireAdminPermission("leads", "users"),
+  async (req, res, next) => {
+    try {
+      const row = await loadQuoteUploadForAdmin(req, res);
+      if (!row) return;
+
+      const parsed = parseActionUpdateBody(req, res);
+      if (!parsed) return;
+
+      const updated = await updateQuoteUploadReview(row.id, parsed);
+
+      if (
+        parsed.status &&
+        parsed.status !== normalizeProjectActionStatus(row.status) &&
+        String(updated?.email || "").trim()
+      ) {
+        await sendQuoteUploadStatusUpdateEmail({
+          to: String(updated.email).trim().toLowerCase(),
+          fullName: String(updated.full_name || "").trim(),
+          fileName: String(updated.original_name || "").trim(),
+          assessmentRef: updated.assessment_id
+            ? formatAssessmentId(updated.assessment_id)
+            : "",
+          statusLabel: projectActionStatusEmailLabel(parsed.status),
+        }).catch(() => {});
+      }
+
+      res.json({
+        success: true,
+        message: "Quote upload updated",
+        data: mapQuoteUploadRow(updated),
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
 
 router.get(
   "/financing-enquiries",
@@ -803,6 +1060,25 @@ router.patch(
         status: nextStatus,
         adminNotes: adminNotes === undefined ? undefined : adminNotes.trim(),
       });
+
+      if (
+        nextStatus &&
+        nextStatus !== normalizeFinancingStatus(row.status) &&
+        String(updated?.contact_email || "").trim()
+      ) {
+        await sendFinancingStatusUpdateEmail({
+          to: String(updated.contact_email).trim().toLowerCase(),
+          fullName: String(updated.contact_full_name || "").trim(),
+          reference: String(updated.reference || "").trim(),
+          partnerName: String(updated.partner_name || "").trim(),
+          statusLabel:
+            FINANCING_STATUS_EMAIL_LABELS[nextStatus] ||
+            String(nextStatus).replace(/_/g, " "),
+          assessmentRef: updated.assessment_id
+            ? formatAssessmentId(updated.assessment_id)
+            : "",
+        }).catch(() => {});
+      }
 
       res.json({
         success: true,

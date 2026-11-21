@@ -8,6 +8,7 @@ import { createCorsOptions, getAllowedOrigins } from "./config/cors.js";
 import { getServerConfig, isProduction, validateEnv } from "./config/env.js";
 import {
   ensureUploadDirs,
+  getAvatarsDir,
   getBlogImagesDir,
 } from "./services/fileStorage.service.js";
 import apiRoutes from "./routes/index.js";
@@ -56,6 +57,16 @@ app.get("/", (_req, res) => {
 app.use(
   "/api/uploads/blog-images",
   express.static(getBlogImagesDir(), {
+    index: false,
+    dotfiles: "deny",
+    maxAge: "30d",
+    immutable: true,
+  }),
+);
+
+app.use(
+  "/api/uploads/avatars",
+  express.static(getAvatarsDir(), {
     index: false,
     dotfiles: "deny",
     maxAge: "30d",

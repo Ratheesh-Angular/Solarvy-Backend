@@ -3,7 +3,8 @@ import { createRequestIntro } from "../repositories/requestIntro.repository.js";
 import { validateRequestIntro } from "../middleware/validate.js";
 import { createActivityEvent } from "../repositories/activity.repository.js";
 import { resolveVisitorContext } from "../utils/resolveVisitorContext.js";
-import { parseAssessmentIdParam } from "../utils/assessmentId.js";
+import { formatAssessmentId, parseAssessmentIdParam } from "../utils/assessmentId.js";
+import { sendRequestIntroConfirmationEmail } from "../services/email.service.js";
 
 const router = Router();
 
@@ -92,6 +93,14 @@ router.post("/", validateRequestIntro, async (req, res, next) => {
       },
       ip,
       userAgent,
+    }).catch(() => {});
+
+    await sendRequestIntroConfirmationEmail({
+      to: email.trim().toLowerCase(),
+      fullName: fullName.trim(),
+      installerName: snapshot?.installerName || "",
+      assessmentRef: assessmentId ? formatAssessmentId(assessmentId) : "",
+      projectTimeline: projectTimeline?.trim() || "",
     }).catch(() => {});
 
     res.status(201).json({

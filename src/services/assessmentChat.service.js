@@ -18,6 +18,7 @@ export const EMPTY_ASSESSMENT_FORM = {
   template: "",
   country: "",
   city: "",
+  state: "",
   powerSetup: "",
   gridUnavailableBand: "",
   monthlyGeneratorFuelSpend: "",
@@ -179,12 +180,21 @@ export function validateAndMergePatch(currentForm, patch, catalogs) {
     const country = pickFromList(src.country, catalogs.countries);
     next.country = country || src.country.trim();
   }
-  if (typeof src.city === "string" && src.city.trim()) {
-    const city = pickFromList(src.city, [
-      ...(catalogs.states || []),
-      ...(catalogs.cities || []),
-    ]);
-    next.city = city || src.city.trim();
+  const locationLists = [
+    ...(catalogs.states || []),
+    ...(catalogs.cities || []),
+  ];
+  let locationLabel = null;
+  if (typeof src.state === "string" && src.state.trim()) {
+    locationLabel =
+      pickFromList(src.state, locationLists) || src.state.trim();
+  }
+  if (!locationLabel && typeof src.city === "string" && src.city.trim()) {
+    locationLabel = pickFromList(src.city, locationLists) || src.city.trim();
+  }
+  if (locationLabel) {
+    next.state = locationLabel;
+    next.city = locationLabel;
   }
 
   const powerSetup = pickFromList(src.powerSetup, catalogs.powerSetups);
@@ -284,7 +294,7 @@ export function getMissingFields(formData) {
   if (!form.gridUnavailableBand) missing.push("gridUnavailableBand");
   if (!form.mainObjective) missing.push("mainObjective");
   if (!form.country) missing.push("country");
-  if (!form.city) missing.push("city");
+  if (!form.state && !form.city) missing.push("city");
   if (!form.backupDuration) missing.push("backupDuration");
   if (!form.inputMethod) missing.push("inputMethod");
 

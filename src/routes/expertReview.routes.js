@@ -5,7 +5,8 @@ import { validateExpertReview } from "../middleware/validate.js";
 import { createActivityEvent } from "../repositories/activity.repository.js";
 import { saveUpload } from "../services/fileStorage.service.js";
 import { resolveVisitorContext } from "../utils/resolveVisitorContext.js";
-import { parseAssessmentIdParam } from "../utils/assessmentId.js";
+import { formatAssessmentId, parseAssessmentIdParam } from "../utils/assessmentId.js";
+import { sendExpertReviewConfirmationEmail } from "../services/email.service.js";
 
 const router = Router();
 
@@ -133,6 +134,15 @@ router.post(
         },
         ip,
         userAgent,
+      }).catch(() => {});
+
+      await sendExpertReviewConfirmationEmail({
+        to: email.trim().toLowerCase(),
+        fullName: fullName.trim(),
+        installerName: snapshot?.installerName || "",
+        assessmentRef: assessmentId ? formatAssessmentId(assessmentId) : "",
+        reviewType: reviewType?.trim() || "",
+        hasAttachment: Boolean(fileMeta.storagePath),
       }).catch(() => {});
 
       res.status(201).json({

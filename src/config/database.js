@@ -53,6 +53,9 @@ async function initSchema(db) {
       project_timeline VARCHAR(100) DEFAULT '',
       additional_notes TEXT DEFAULT '',
       project_summary JSONB,
+      status VARCHAR(40) NOT NULL DEFAULT 'submitted',
+      admin_notes TEXT NOT NULL DEFAULT '',
+      status_updated_at TIMESTAMPTZ NULL,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
@@ -79,6 +82,9 @@ async function initSchema(db) {
       review_type VARCHAR(100) DEFAULT '',
       additional_notes TEXT DEFAULT '',
       attachment_file_name VARCHAR(255) DEFAULT '',
+      status VARCHAR(40) NOT NULL DEFAULT 'submitted',
+      admin_notes TEXT NOT NULL DEFAULT '',
+      status_updated_at TIMESTAMPTZ NULL,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
@@ -177,7 +183,11 @@ async function initSchema(db) {
       mime_type VARCHAR(120) DEFAULT '',
       size_bytes INTEGER DEFAULT 0,
       storage_path TEXT NOT NULL DEFAULT '',
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      status VARCHAR(40) NOT NULL DEFAULT 'submitted',
+      admin_notes TEXT NOT NULL DEFAULT '',
+      status_updated_at TIMESTAMPTZ NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS chat_sessions (
@@ -341,6 +351,13 @@ async function initSchema(db) {
 
   await ensureColumn(
     db,
+    "users",
+    "avatar_url",
+    "VARCHAR(512) NOT NULL DEFAULT ''",
+  );
+
+  await ensureColumn(
+    db,
     "financing_enquiries",
     "contact_full_name",
     "VARCHAR(255) NOT NULL DEFAULT ''",
@@ -379,6 +396,24 @@ async function initSchema(db) {
   );
   await ensureColumn(db, "request_intros", "installer_snapshot", "JSONB");
   await ensureColumn(db, "request_intros", "assessment_id", "INTEGER NULL");
+  await ensureColumn(
+    db,
+    "request_intros",
+    "status",
+    "VARCHAR(40) NOT NULL DEFAULT 'submitted'",
+  );
+  await ensureColumn(
+    db,
+    "request_intros",
+    "admin_notes",
+    "TEXT NOT NULL DEFAULT ''",
+  );
+  await ensureColumn(
+    db,
+    "request_intros",
+    "status_updated_at",
+    "TIMESTAMPTZ NULL",
+  );
   await ensureColumn(db, "expert_reviews", "visitor_id", "UUID NULL");
   await ensureColumn(db, "expert_reviews", "session_id", "UUID NULL");
   await ensureColumn(
@@ -403,12 +438,54 @@ async function initSchema(db) {
   );
   await ensureColumn(db, "expert_reviews", "size_bytes", "INTEGER DEFAULT 0");
   await ensureColumn(db, "expert_reviews", "storage_path", "TEXT DEFAULT ''");
+  await ensureColumn(
+    db,
+    "expert_reviews",
+    "status",
+    "VARCHAR(40) NOT NULL DEFAULT 'submitted'",
+  );
+  await ensureColumn(
+    db,
+    "expert_reviews",
+    "admin_notes",
+    "TEXT NOT NULL DEFAULT ''",
+  );
+  await ensureColumn(
+    db,
+    "expert_reviews",
+    "status_updated_at",
+    "TIMESTAMPTZ NULL",
+  );
   await ensureColumn(db, "quote_uploads", "location", "VARCHAR(255) DEFAULT ''");
   await ensureColumn(
     db,
     "quote_uploads",
     "additional_notes",
     "TEXT DEFAULT ''",
+  );
+  await ensureColumn(
+    db,
+    "quote_uploads",
+    "status",
+    "VARCHAR(40) NOT NULL DEFAULT 'submitted'",
+  );
+  await ensureColumn(
+    db,
+    "quote_uploads",
+    "admin_notes",
+    "TEXT NOT NULL DEFAULT ''",
+  );
+  await ensureColumn(
+    db,
+    "quote_uploads",
+    "status_updated_at",
+    "TIMESTAMPTZ NULL",
+  );
+  await ensureColumn(
+    db,
+    "quote_uploads",
+    "updated_at",
+    "TIMESTAMPTZ NOT NULL DEFAULT NOW()",
   );
   await ensureColumn(db, "visitors", "user_number", "INTEGER");
 

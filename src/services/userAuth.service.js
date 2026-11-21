@@ -14,12 +14,18 @@ import {
   findUserByEmail,
   findUserByGoogleSub,
   findUserById,
+  setUserAvatar,
   toPublicUser,
   touchUserLogin,
+  updateAccountProfile,
   updateUserProfile,
 } from "../repositories/user.repository.js";
 import { sendOtpEmail } from "./email.service.js";
 import { lookupIpGeolocation } from "./ipGeolocation.service.js";
+import {
+  deleteStoredFile,
+  saveAvatar,
+} from "./fileStorage.service.js";
 import { isValidEmail, normalizeNigeriaPhone } from "../utils/phone.js";
 import {
   getClientIp,
@@ -28,6 +34,7 @@ import {
 } from "../utils/requestMeta.js";
 import { upsertVisitorAndSession } from "../repositories/visitor.repository.js";
 import { getPool } from "../config/database.js";
+import { getServerConfig, isProduction } from "../config/env.js";
 
 const USER_TOKEN_EXPIRY = "30d";
 const OTP_TTL_MS = 10 * 60 * 1000;
@@ -79,7 +86,23 @@ async function linkVisitorToUser(req, userId) {
   );
 }
 
-function issueUserToken(user) {
+function apiOriginFromReq(req) {
+  const { apiUrl } = getServerConfig();
+  // In development, prefer relative URLs so local uploads are served via the
+  // Vite /api proxy instead of a production API_URL in Backend/.env.
+  if (!isProduction()) {
+    return "";
+  }
+  if (apiUrl) return apiUrl.replace(/\/$/, "");
+  if (!req) return "";
+  return `${req.protocol}://${req.get("host")}`;
+}
+
+function publicUser(user, req) {
+  return toPublicUser(user, { apiOrigin: apiOriginFromReq(req) });
+}
+
+function issueUserToken(user, req) {
   const token = jwt.sign(
     { sub: user.id, email: user.email, typ: "user" },
     getUserJwtSecret(),
@@ -87,7 +110,7 @@ function issueUserToken(user) {
   );
   return {
     token,
-    user: toPublicUser(user),
+    user: publicUser(user, req),
   };
 }
 
@@ -223,7 +246,7 @@ export async function verifySignupOtp(req, { email, code }) {
   });
 
   await linkVisitorToUser(req, user.id);
-  return issueUserToken(user);
+  return issueUserToken(user, req);
 }
 
 export async function requestLoginOtp(req, { email }) {
@@ -324,7 +347,7 @@ export async function verifyLoginOtp(req, { email, code }) {
     ipCity: geo.ipCity || "",
   });
   await linkVisitorToUser(req, user.id);
-  return issueUserToken(updated || user);
+  return issueUserToken(updated || user, req);
 }
 
 async function verifyGoogleIdToken(idToken) {
@@ -449,17 +472,101 @@ export async function authenticateWithGoogle(
   }
 
   await linkVisitorToUser(req, user.id);
-  return issueUserToken(user);
+  return issueUserToken(user, req);
 }
 
-export async function verifyUserToken(token) {
+export async function verifyUserToken(token, req) {
   if (!token) return null;
   try {
     const payload = jwt.verify(token, getUserJwtSecret());
     if (payload.typ && payload.typ !== "user") return null;
     const user = await findUserById(payload.sub);
-    return user ? toPublicUser(user) : null;
+    return user ? publicUser(user, req) : null;
   } catch {
     return null;
   }
+}
+
+export async function updateCurrentUserProfile(
+  req,
+  { fullName, phoneE164, country, region, city },
+) {
+  const token = String(req.headers.authorization || "").replace(
+    /^Bearer\s+/i,
+    "",
+  );
+  const current = await verifyUserToken(token, req);
+  if (!current) {
+    const err = new Error("Unauthorized");
+    err.status = 401;
+    throw err;
+  }
+
+  const name = String(fullName || "").trim();
+  if (!name) {
+    const err = new Error("Full name is required");
+    err.status = 400;
+    throw err;
+  }
+
+  const phone = normalizeNigeriaPhone(phoneE164);
+  if (!phone) {
+    const err = new Error("Enter a valid Nigeria phone number");
+    err.status = 400;
+    throw err;
+  }
+
+  const updated = await updateAccountProfile(current.id, {
+    fullName: name,
+    phoneE164: phone,
+    country: String(country || "").trim(),
+    region: String(region || "").trim(),
+    city: String(city || "").trim(),
+  });
+
+  return publicUser(updated, req);
+}
+
+export async function uploadCurrentUserAvatar(req, file) {
+  const token = String(req.headers.authorization || "").replace(
+    /^Bearer\s+/i,
+    "",
+  );
+  const current = await verifyUserToken(token, req);
+  if (!current) {
+    const err = new Error("Unauthorized");
+    err.status = 401;
+    throw err;
+  }
+
+  const existing = await findUserById(current.id);
+  const saved = await saveAvatar(file);
+
+  if (existing?.avatarUrl && !/^https?:\/\//i.test(existing.avatarUrl)) {
+    await deleteStoredFile(existing.avatarUrl);
+  }
+
+  const updated = await setUserAvatar(current.id, saved.storagePath);
+  return publicUser(updated, req);
+}
+
+export async function deleteCurrentUserAvatar(req) {
+  const token = String(req.headers.authorization || "").replace(
+    /^Bearer\s+/i,
+    "",
+  );
+  const current = await verifyUserToken(token, req);
+  if (!current) {
+    const err = new Error("Unauthorized");
+    err.status = 401;
+    throw err;
+  }
+
+  const existing = await findUserById(current.id);
+  if (existing?.avatarUrl && !/^https?:\/\//i.test(existing.avatarUrl)) {
+    await deleteStoredFile(existing.avatarUrl);
+  }
+
+  const updated = await setUserAvatar(current.id, "");
+  return publicUser(updated, req);
 }
