@@ -7,8 +7,34 @@ import { saveUpload } from "../services/fileStorage.service.js";
 import { resolveVisitorContext } from "../utils/resolveVisitorContext.js";
 import { formatAssessmentId, parseAssessmentIdParam } from "../utils/assessmentId.js";
 import { sendExpertReviewConfirmationEmail } from "../services/email.service.js";
+import { verifyUserToken } from "../services/userAuth.service.js";
+import { syncUserContactFromLead } from "../repositories/user.repository.js";
+import { normalizeNigeriaPhone } from "../utils/phone.js";
 
 const router = Router();
+
+function getBearerToken(req) {
+  const header = req.headers.authorization || "";
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || "";
+}
+
+/** Best-effort: sync submitted contact onto the signed-in user account. */
+async function syncContactIfAuthenticated(req, { fullName, phoneNumber }) {
+  try {
+    const token = getBearerToken(req);
+    if (!token) return;
+    const user = await verifyUserToken(token, req);
+    if (!user?.id) return;
+    const phoneE164 = normalizeNigeriaPhone(phoneNumber) || "";
+    await syncUserContactFromLead(user.id, {
+      fullName,
+      phoneE164,
+    });
+  } catch {
+    // never fail the lead submission because of account sync
+  }
+}
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -144,6 +170,11 @@ router.post(
         reviewType: reviewType?.trim() || "",
         hasAttachment: Boolean(fileMeta.storagePath),
       }).catch(() => {});
+
+      await syncContactIfAuthenticated(req, {
+        fullName: fullName.trim(),
+        phoneNumber: phoneNumber.trim(),
+      });
 
       res.status(201).json({
         success: true,

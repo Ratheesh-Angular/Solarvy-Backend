@@ -32,6 +32,63 @@ async function runExcelCalculation(formData) {
   }
 }
 
+/**
+ * Start AI recommendation generation without blocking the HTTP response.
+ * Persists text when ready; overlaps safely with the recommendation POST routes
+ * via in-flight dedupe in recommendation.service.
+ */
+function prefetchRecommendations(assessmentId, formData, results) {
+  if (!Number.isFinite(assessmentId)) return;
+  if (!results || typeof results !== "object" || results.calculationError) {
+    return;
+  }
+
+  void (async () => {
+    try {
+      const [withAi, withQs] = await Promise.all([
+        withAiRecommendation(formData, results, assessmentId),
+        withQuickSnapshotRecommendation(formData, results, assessmentId),
+      ]);
+
+      const aiText = String(withAi?.aiRecommendation || "").trim();
+      const qsText = String(withQs?.quickSnapshotRecommendation || "").trim();
+      if (!aiText && !qsText) return;
+
+      const latest = await getAssessmentById(assessmentId);
+      const latestResults =
+        latest?.results && typeof latest.results === "object"
+          ? latest.results
+          : results;
+
+      const next = { ...latestResults };
+      if (aiText && !String(latestResults.aiRecommendation || "").trim()) {
+        next.aiRecommendation = aiText;
+      }
+      if (
+        qsText &&
+        !String(latestResults.quickSnapshotRecommendation || "").trim()
+      ) {
+        next.quickSnapshotRecommendation = qsText;
+      }
+
+      if (
+        next.aiRecommendation === latestResults.aiRecommendation &&
+        next.quickSnapshotRecommendation ===
+          latestResults.quickSnapshotRecommendation
+      ) {
+        return;
+      }
+
+      await updateAssessmentResults(assessmentId, next);
+    } catch (error) {
+      console.warn(
+        "recommendation: background prefetch failed:",
+        error?.message || error,
+      );
+    }
+  })();
+}
+
 router.post("/drafts", async (req, res, next) => {
   try {
     const meta = await resolveVisitorContext(req);
@@ -147,6 +204,12 @@ router.post("/drafts/:id/complete", async (req, res, next) => {
       userAgent: meta.userAgent,
     }).catch(() => {});
 
+    prefetchRecommendations(
+      assessment.id,
+      assessment.form_data,
+      assessment.results,
+    );
+
     res.status(201).json({
       success: true,
       message: "Assessment completed",
@@ -181,6 +244,11 @@ router.post("/complete", async (req, res, next) => {
       userAgent: meta.userAgent,
     }).catch(() => {});
 
+    prefetchRecommendations(
+      assessment.id,
+      assessment.form_data,
+      assessment.results,
+    );
     res.status(201).json({
       success: true,
       message: "Assessment completed",
@@ -238,7 +306,11 @@ router.post("/:id/recommendation", async (req, res, next) => {
       return;
     }
 
-    const withRec = await withAiRecommendation(assessment.form_data, results);
+    const withRec = await withAiRecommendation(
+      assessment.form_data,
+      results,
+      assessment.id,
+    );
     const text = String(withRec?.aiRecommendation || "").trim() || null;
 
     if (text) {
@@ -307,6 +379,7 @@ router.post("/:id/quick-snapshot-recommendation", async (req, res, next) => {
     const withRec = await withQuickSnapshotRecommendation(
       assessment.form_data,
       results,
+      assessment.id,
     );
     const text =
       String(withRec?.quickSnapshotRecommendation || "").trim() || null;
@@ -372,6 +445,12 @@ router.post("/:id/recalculate", async (req, res, next) => {
     }
 
     const updated = await updateAssessmentResults(assessment.id, merged);
+
+    prefetchRecommendations(
+      updated.id,
+      updated.form_data,
+      updated.results,
+    );
 
     res.json({
       success: true,

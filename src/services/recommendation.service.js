@@ -12,6 +12,9 @@ import {
 import { getSetting } from "../repositories/appSettings.repository.js";
 import { completeChatText } from "./openai.service.js";
 
+/** @type {Map<string, Promise<string|null>>} */
+const inflightGenerations = new Map();
+
 function parseObject(raw) {
   if (!raw) return null;
   if (typeof raw === "object") return raw;
@@ -84,6 +87,28 @@ function normalizeRecommendation(content, maxChars) {
   return truncateAtSentence(text, maxChars);
 }
 
+function inflightKey(kind, assessmentId) {
+  if (!Number.isFinite(assessmentId)) return null;
+  return `${kind}:${assessmentId}`;
+}
+
+async function withInflight(key, fn) {
+  if (!key) return fn();
+  const existing = inflightGenerations.get(key);
+  if (existing) return existing;
+
+  const promise = Promise.resolve()
+    .then(fn)
+    .finally(() => {
+      if (inflightGenerations.get(key) === promise) {
+        inflightGenerations.delete(key);
+      }
+    });
+
+  inflightGenerations.set(key, promise);
+  return promise;
+}
+
 async function generateWithPrompt({
   formData,
   results,
@@ -111,46 +136,62 @@ async function generateWithPrompt({
   }
 }
 
-export async function generateRecommendation(formData, results) {
-  return generateWithPrompt({
-    formData,
-    results,
-    settingKey: RECOMMENDATION_SETTING_KEY,
-    defaultPrompt: DEFAULT_RECOMMENDATION_SYSTEM_PROMPT,
-    userPromptTemplate: RECOMMENDATION_USER_PROMPT,
-    maxChars: RECOMMENDATION_MAX_CHARS,
-    logLabel: "AI recommendation",
-  });
+export async function generateRecommendation(formData, results, assessmentId) {
+  return withInflight(inflightKey("ai", assessmentId), () =>
+    generateWithPrompt({
+      formData,
+      results,
+      settingKey: RECOMMENDATION_SETTING_KEY,
+      defaultPrompt: DEFAULT_RECOMMENDATION_SYSTEM_PROMPT,
+      userPromptTemplate: RECOMMENDATION_USER_PROMPT,
+      maxChars: RECOMMENDATION_MAX_CHARS,
+      logLabel: "AI recommendation",
+    }),
+  );
 }
 
-export async function generateQuickSnapshotRecommendation(formData, results) {
-  return generateWithPrompt({
-    formData,
-    results,
-    settingKey: QUICK_SNAPSHOT_RECOMMENDATION_SETTING_KEY,
-    defaultPrompt: DEFAULT_QUICK_SNAPSHOT_RECOMMENDATION_SYSTEM_PROMPT,
-    userPromptTemplate: QUICK_SNAPSHOT_RECOMMENDATION_USER_PROMPT,
-    maxChars: QUICK_SNAPSHOT_RECOMMENDATION_MAX_CHARS,
-    logLabel: "quick snapshot recommendation",
-  });
+export async function generateQuickSnapshotRecommendation(
+  formData,
+  results,
+  assessmentId,
+) {
+  return withInflight(inflightKey("quick", assessmentId), () =>
+    generateWithPrompt({
+      formData,
+      results,
+      settingKey: QUICK_SNAPSHOT_RECOMMENDATION_SETTING_KEY,
+      defaultPrompt: DEFAULT_QUICK_SNAPSHOT_RECOMMENDATION_SYSTEM_PROMPT,
+      userPromptTemplate: QUICK_SNAPSHOT_RECOMMENDATION_USER_PROMPT,
+      maxChars: QUICK_SNAPSHOT_RECOMMENDATION_MAX_CHARS,
+      logLabel: "quick snapshot recommendation",
+    }),
+  );
 }
 
-export async function withAiRecommendation(formData, results) {
+export async function withAiRecommendation(formData, results, assessmentId) {
   if (!results || typeof results !== "object") return results;
   if (results.calculationError) return results;
   if (String(results.aiRecommendation || "").trim()) return results;
 
-  const text = await generateRecommendation(formData, results);
+  const text = await generateRecommendation(formData, results, assessmentId);
   if (!text) return results;
   return { ...results, aiRecommendation: text };
 }
 
-export async function withQuickSnapshotRecommendation(formData, results) {
+export async function withQuickSnapshotRecommendation(
+  formData,
+  results,
+  assessmentId,
+) {
   if (!results || typeof results !== "object") return results;
   if (results.calculationError) return results;
   if (String(results.quickSnapshotRecommendation || "").trim()) return results;
 
-  const text = await generateQuickSnapshotRecommendation(formData, results);
+  const text = await generateQuickSnapshotRecommendation(
+    formData,
+    results,
+    assessmentId,
+  );
   if (!text) return results;
   return { ...results, quickSnapshotRecommendation: text };
 }

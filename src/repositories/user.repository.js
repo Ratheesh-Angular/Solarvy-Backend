@@ -170,6 +170,26 @@ export async function touchUserLogin(
   return mapUser(result.rows[0]);
 }
 
+/** Update name/phone from a lead form without touching email or last_login_at. */
+export async function syncUserContactFromLead(
+  id,
+  { fullName = "", phoneE164 = "" } = {},
+) {
+  const name = String(fullName || "").trim();
+  const phone = String(phoneE164 || "").trim();
+  if (!id || (!name && !phone)) return null;
+  const result = await getPool().query(
+    `UPDATE users SET
+       full_name = CASE WHEN $2 <> '' THEN $2 ELSE full_name END,
+       phone_e164 = CASE WHEN $3 <> '' THEN $3 ELSE phone_e164 END,
+       updated_at = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [id, name, phone],
+  );
+  return mapUser(result.rows[0]);
+}
+
 export async function updateAccountProfile(
   id,
   { fullName, phoneE164, country = "", region = "", city = "" },
