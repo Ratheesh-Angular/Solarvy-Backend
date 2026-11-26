@@ -230,13 +230,7 @@ export const TEMPLATE_RANGES = {
 
 export const DROPDOWN_FALLBACKS = {
   propertyTypes: ["Home", "Hotel", "Commercial", "Factory", "Hospital", "School"],
-  powerSetups: [
-    "Grid Only",
-    "Grid + Generator",
-    "Solar + Grid",
-    "Generator Only",
-    "No Reliable Grid",
-  ],
+  powerSetups: ["Grid Only", "Grid + Generator", "Solar + Grid"],
   objectives: [
     "Reduce Electricity Bills",
     "Reduce Diesel Use",
