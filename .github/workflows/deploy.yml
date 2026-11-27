@@ -26,13 +26,12 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script_stop: true
           script: |
+            echo "==> Script started on $(hostname) as $(whoami)"
             set -e
+            set -x
 
-            # Load nvm if it is installed, so node/npm/pm2 are on PATH in this non-interactive shell
-            export NVM_DIR="$HOME/.nvm"
-            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-
-            cd "${{ secrets.EC2_APP_DIR }}"
+            cd /home/ubuntu/Solarvy-Backend
+            pwd
 
             echo "==> Fetching latest main"
             git fetch origin main
