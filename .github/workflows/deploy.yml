@@ -1,0 +1,60 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -e
+
+            # Load nvm if it is installed, so node/npm/pm2 are on PATH in this non-interactive shell
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+
+            cd "${{ secrets.EC2_APP_DIR }}"
+
+            echo "==> Fetching latest main"
+            git fetch origin main
+            git reset --hard origin/main
+
+            echo "==> Installing production dependencies"
+            npm ci --omit=dev
+
+            echo "==> Reloading app with PM2"
+            pm2 startOrReload ecosystem.config.cjs --update-env
+            pm2 save
+
+            echo "==> Health check"
+            for i in $(seq 1 15); do
+              if curl -fsS http://localhost:5000/api/health; then
+                echo ""
+                echo "==> Deploy OK"
+                exit 0
+              fi
+              sleep 2
+            done
+
+            echo "==> Health check FAILED. Recent logs:"
+            pm2 logs solarvy-api --lines 40 --nostream || true
+            exit 1
